@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""olnm 🧷 OneLinearNumerousMemo — one Python file that hands bash/zsh a few hundred human-sized one-liners.
+"""olnm 🧷 OneLinearNumerousMemo — one Python file: a few hundred bash/zsh one-liners + a local GitHub-like forge.
 
     curl -fsSL <RAW_URL>/olnm.py -o ~/.olnm.py && echo 'eval "$(python3 ~/.olnm.py init)"' >> ~/.bashrc   # or ~/.zshrc
 
     olnm            📖 list            olnm git        📖 one section
-    olnm_like uvtets 🤔 closest names  olnm_dial 0..3  🎛️ shared dial with hubdial ($DIAL_FILE)
+    olnm_like uvtets 🤔 closest names  olnm_dial 0..3  🎛️ 0🔌 offline · 1🏠 local · 2🔁 mirror · 3☁️ github
+    hubdial install / init / up      🏠 local forge (Forgejo) · hubadd · ghpr/ghis go there at dial ≤2
 
 Rules: one function per line in SHELL below, `# <emoji> name: what it does` right above it = the help text.
        🌍 in a description = needs internet (stubbed at dial 0/1).  🎛️ = routed to hubdial at dial ≤2.
@@ -16,19 +17,28 @@ and Node / Bun (`execFileSync("python3", ["olnm.py", "run", "pycalc", "2**10"])`
 from __future__ import annotations
 
 import argparse
+import base64
+import contextlib
 import difflib
+import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
+import signal
 import subprocess
 import sys
+import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 PY = Path(__file__).resolve()
-DIAL_FILE = Path(os.environ.get("DIAL_FILE", Path.home() / ".config" / "dial"))
+OLNM_HOME = Path(os.environ.get("OLNM_HOME", Path.home() / ".olnm"))
+DIAL_FILE = Path(os.environ.get("DIAL_FILE", OLNM_HOME / "dial"))
 DIALS = {0: "🔌 offline", 1: "🏠 local", 2: "🔁 mirror", 3: "☁️ github"}
-TOOLS = ("python3", "uv", "node", "npm", "npx", "bun", "git", "gh", "hubdial", "fzf", "fd", "rg", "jq", "curl", "docker", "tmux", "entr", "tree")
+TOOLS = ("python3", "uv", "node", "npm", "npx", "bun", "git", "gh", "fzf", "fd", "rg", "jq", "curl", "docker", "tmux", "entr", "tree")
 HELP = re.compile(r"^# (\S+) ([A-Za-z_0-9]+): (.*)$")
 SECTION = re.compile(r"^# ─+ (\S+) (\S+) ─+$")
 
@@ -46,7 +56,7 @@ olnm_sections() { python3 "$OLNM_PY" sections; }
 olnm_offline() { python3 "$OLNM_PY" ls --offline "$@"; }
 # 🌍 olnm_net: names that need internet
 olnm_net() { python3 "$OLNM_PY" net; }
-# 🎛️ olnm_dial: show / set shared dial 0🔌 1🏠 2🔁 3☁️ (also drives hubdial)
+# 🎛️ olnm_dial: show / set dial 0🔌 1🏠 2🔁 3☁️ (also starts/stops the forge, re-points origins)
 olnm_dial() { python3 "$OLNM_PY" dial "$@" && olnm_reload >/dev/null; }
 # 🩺 olnm_doctor: which tools are present
 olnm_doctor() { python3 "$OLNM_PY" doctor; }
@@ -59,7 +69,7 @@ olnm_update() { [ -n "$OLNM_URL" ] || { echo "set OLNM_URL"; return 1; }; curl -
 # 🔢 olnm_steps: non-blank lines of olnm.py
 olnm_steps() { grep -cve '^\s*$' "$OLNM_PY"; }
 _olnm_d() { cat "$DIAL_FILE" 2>/dev/null || echo 3; }
-_olnm_hub() { [ "$(_olnm_d)" -le 2 ] && command -v hubdial >/dev/null; }
+_olnm_hub() { [ "$(_olnm_d)" -le 2 ] && [ -f "$OLNM_HOME/forge/state.json" ]; }
 _olnm_cnf() { python3 "$OLNM_PY" like "$1" --hint >&2; return 127; }
 """
 
@@ -243,8 +253,8 @@ ghco() { gh pr checkout "$1"; }
 ghis() { _olnm_hub && { hubdial issue ls; return; }; gh issue list "$@"; }
 # 🐛 ghisn: 🎛️ new issue (ghisn "title" [label]) (hubdial at dial ≤2)
 ghisn() { _olnm_hub && { hubdial issue new "$1" ${2:+--label "$2"}; return; }; gh issue create --title "$1" --body "" ${2:+--label "$2"}; }
-# 🌐 ghweb: 🌍 open repo in browser
-ghweb() { gh repo view --web; }
+# 🌐 ghweb: 🎛️ open repo in browser (local forge at dial ≤2)
+ghweb() { _olnm_hub && { hubopen; return; }; gh repo view --web; }
 # 🏃 ghruns: 🌍 recent workflow runs
 ghruns() { gh run list --limit "${1:-10}"; }
 # 👀 ghwatch: 🌍 watch latest workflow run
@@ -482,6 +492,16 @@ licenses() { python3 -c 'import importlib.metadata as m;[print(f"{d.metadata["Na
 # 📋 pyfreeze: pip freeze of current interpreter (uv env if present)
 pyfreeze() { uv pip freeze 2>/dev/null || python3 -m pip freeze; }
 
+# ───────────────────────── 🏠 hub ─────────────────────────
+# 🏠 hubdial: local GitHub-like forge (hubdial install | init | up | down | status | repo | issue | pr | labels | sync | api)
+hubdial() { python3 "$OLNM_PY" hub "$@"; }
+# 📚 hubadd: register cwd in the local forge (hubadd [--github owner/name])
+hubadd() { hubdial repo add . "$@"; }
+# 🔄 hubsync: push every registered repo to bare / local / github(dial ≥2)
+hubsync() { hubdial sync; }
+# 🌐 hubopen: open the local forge in a browser (or print its URL)
+hubopen() { local u; u="http://localhost:$(python3 "$OLNM_PY" call hub_port 2>/dev/null)/"; command -v xdg-open >/dev/null && xdg-open "$u" >/dev/null 2>&1 || echo "$u"; }
+
 # ───────────────────────── 🐳 docker ─────────────────────────
 # 🐳 dps: running containers, compact
 dps() { docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' "$@"; }
@@ -545,6 +565,10 @@ def names() -> list[str]:
     return [e["name"] for e in entries()]
 
 
+def _sections() -> list[str]:
+    return ["meta"] + [m.group(2) for m in map(SECTION.match, SHELL.splitlines()) if m]
+
+
 def sections() -> list[str]:
     """Section names in file order."""
     seen = _sections()
@@ -570,10 +594,6 @@ def ls(section: str | None = None, offline: bool = False) -> list[dict]:
     return rows
 
 
-def _sections() -> list[str]:
-    return ["meta"] + [m.group(2) for m in map(SECTION.match, SHELL.splitlines()) if m]
-
-
 def grep(*words: str) -> list[dict]:
     """Search names and descriptions (all words must match, case-insensitive)."""
     ws = [w.lower() for w in words]
@@ -590,10 +610,7 @@ def like(word: str, hint: bool = False, n: int = 6) -> list[str]:
     hits += [x for x in difflib.get_close_matches(word, pool, n, 0.5) if x not in hits]
     hits = hits[:n]
     if hint:
-        if hits:
-            print(f"🤔 {word} → did you mean: {' '.join(hits)}")
-        else:
-            print(f"❓ {word}: command not found")
+        print(f"🤔 {word} → did you mean: {' '.join(hits)}" if hits else f"❓ {word}: command not found")
     else:
         print("\n".join(hits))
     return hits
@@ -601,45 +618,473 @@ def like(word: str, hint: bool = False, n: int = 6) -> list[str]:
 
 # ───────────────────────── 🎛️ dial ─────────────────────────
 def read_dial(default: int = 3) -> int:
+    """Current dial (0..3); unset = 3 (plain online box)."""
     try:
         return int(DIAL_FILE.read_text().strip())
     except (OSError, ValueError):
         return default
 
 
+def _write_dial(level: int) -> None:
+    DIAL_FILE.parent.mkdir(parents=True, exist_ok=True)
+    DIAL_FILE.write_text(f"{level}\n")
+
+
 def dial(level: int | None = None) -> int:
-    """Show or set the shared dial. Also tells hubdial (if installed) so remotes follow."""
+    """Show or set the dial. When the local forge exists, also start/stop it and re-point every repo's origin."""
     if level is None:
         lv = read_dial()
         print(f"🎛️  {lv} {DIALS[lv]}  ({DIAL_FILE})")
         return lv
     if level not in DIALS:
         raise SystemExit("❌ dial must be 0..3")
-    DIAL_FILE.parent.mkdir(parents=True, exist_ok=True)
-    DIAL_FILE.write_text(f"{level}\n")
-    if shutil.which("hubdial"):
-        subprocess.run(["hubdial", "dial", str(level)], check=False)
+    _write_dial(level)
     print(f"🎛️  → {level} {DIALS[level]}" + ("  🌍 one-liners stubbed" if level <= 1 else ""))
+    if FSTATE.exists():
+        _hub_apply(level)
     return level
 
 
+# ───────────────────────── 🏠 hub: local GitHub-like forge (Forgejo) ─────────────────────────
+FORGE = OLNM_HOME / "forge"
+BIN, DATA, BARE, LOG = FORGE / "bin" / "forgejo", FORGE / "data", FORGE / "bare", FORGE / "log"
+INI, PID, FSTATE = FORGE / "app.ini", FORGE / "forgejo.pid", FORGE / "state.json"
+RELEASES = "https://{host}/forgejo/forgejo/releases/download/v{v}/forgejo-{v}-linux-{arch}"
+API_LATEST = "https://{host}/api/v1/repos/forgejo/forgejo/releases/latest"
+HOSTS = ("codeberg.org", "code.forgejo.org")
+GH_LABELS = {"bug": "d73a4a", "enhancement": "a2eeef", "documentation": "0075ca", "question": "d876e3", "help wanted": "008672", "good first issue": "7057ff", "wontfix": "ffffff", "duplicate": "cfd3d7"}
+APP_INI = """\
+APP_NAME = olnm hub
+RUN_MODE = prod
+WORK_PATH = {home}
+[server]
+PROTOCOL = http
+HTTP_ADDR = 127.0.0.1
+HTTP_PORT = {port}
+ROOT_URL = http://localhost:{port}/
+DISABLE_SSH = true
+OFFLINE_MODE = true
+[database]
+DB_TYPE = sqlite3
+PATH = {data}/forge.db
+[repository]
+ROOT = {data}/repos
+DEFAULT_BRANCH = main
+[security]
+INSTALL_LOCK = true
+SECRET_KEY = {secret}
+[service]
+DISABLE_REGISTRATION = true
+REQUIRE_SIGNIN_VIEW = false
+[mailer]
+ENABLED = false
+[log]
+MODE = file
+ROOT_PATH = {log}
+[actions]
+ENABLED = true
+[mirror]
+ENABLED = true
+DEFAULT_INTERVAL = 1h
+"""
+_NOPROXY = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def _sh(*cmd: str, cwd: Path | None = None, check: bool = True) -> str:
+    r = subprocess.run(cmd, cwd=cwd, text=True, capture_output=True)
+    if check and r.returncode:
+        raise SystemExit(f"❌ {' '.join(cmd)}\n{r.stderr.strip()}")
+    return r.stdout.strip()
+
+
+def _open(req: urllib.request.Request | str, timeout: int):
+    url = req.full_url if isinstance(req, urllib.request.Request) else req
+    opener = _NOPROXY if url.startswith(("http://127.0.0.1", "http://localhost")) else urllib.request.build_opener()
+    return opener.open(req, timeout=timeout)
+
+
+def _fetch(url: str, dest: Path | None = None, timeout: int = 120) -> bytes:
+    with _open(urllib.request.Request(url, headers={"User-Agent": "olnm"}), timeout) as r:
+        data = r.read()
+    if dest:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(data)
+    return data
+
+
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with Path(path).open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _fstate() -> dict:
+    return json.loads(FSTATE.read_text()) if FSTATE.exists() else {"port": 3000, "user": "admin", "repos": {}}
+
+
+def _fsave(st: dict) -> None:
+    FORGE.mkdir(parents=True, exist_ok=True)
+    FSTATE.write_text(json.dumps(st, indent=2, ensure_ascii=False) + "\n")
+    FSTATE.chmod(0o600)
+
+
+def _forge(*args: str, check: bool = True) -> str:
+    if not BIN.exists():
+        raise SystemExit("❌ forgejo binary missing → hubdial install")
+    return _sh(str(BIN), "--config", str(INI), *args, check=check)
+
+
+def _running() -> int:
+    if PID.exists():
+        try:
+            pid = int(PID.read_text() or 0)
+            os.kill(pid, 0)
+            return pid
+        except (OSError, ValueError):
+            PID.unlink(missing_ok=True)
+    return 0
+
+
+def hub_port() -> int:
+    """Port of the local forge."""
+    return _fstate()["port"]
+
+
+def _latest_version() -> str:
+    for host in HOSTS:
+        try:
+            return json.loads(_fetch(API_LATEST.format(host=host), timeout=20))["tag_name"].lstrip("v")
+        except (urllib.error.URLError, KeyError, json.JSONDecodeError, TimeoutError):
+            continue
+    raise SystemExit("❌ cannot reach release API (offline?) → hubdial install --from FILE")
+
+
+def hub_bundle(dest: str = "carry", version: str = "latest", arch: str = "amd64") -> Path:
+    """🌍 Download forgejo + .sha256 into DEST and copy olnm.py beside it — carry DEST into a closed network."""
+    v = _latest_version() if version == "latest" else version
+    out = Path(dest)
+    name = f"forgejo-{v}-linux-{arch}"
+    for host in HOSTS:
+        url = RELEASES.format(host=host, v=v, arch=arch)
+        try:
+            print(f"⬇️  {url}")
+            binary = _fetch(url, out / name, timeout=900)
+            want = _fetch(url + ".sha256", out / f"{name}.sha256", timeout=60).split()[0].decode()
+            break
+        except urllib.error.URLError as e:
+            print(f"⚠️  {host}: {e}")
+    else:
+        raise SystemExit("❌ download failed on all hosts")
+    if hashlib.sha256(binary).hexdigest() != want:
+        raise SystemExit("❌ sha256 mismatch")
+    shutil.copy2(PY, out / "olnm.py")
+    print(f"✅ sha256 ok → 🎒 {out}/  (offline: python3 olnm.py hub install --from {out}/{name})")
+    return out / name
+
+
+def hub_install(version: str = "latest", src: str | None = None, sha: str | None = None) -> Path:
+    """Place forgejo at ~/.olnm/forge/bin. Online: download+verify. Offline: --from carried file (checked against sha or sidecar .sha256)."""
+    if src:
+        path = Path(src)
+        side = path.with_name(path.name + ".sha256")
+        want = sha or (side.read_text().split()[0] if side.exists() else None)
+        if want and _sha256(path) != want:
+            raise SystemExit("❌ sha256 mismatch for carried binary")
+    else:
+        path = hub_bundle(str(FORGE / "bundle"), version)
+    BIN.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(path, BIN)
+    BIN.chmod(0o755)
+    print(f"📦 {BIN} ← {path.name}")
+    try:
+        print(f"🔖 {_forge('--version', check=False) or 'installed'}")
+    except OSError as e:
+        print(f"⚠️  binary not runnable here: {e}")
+    return BIN
+
+
+def hub_init(port: int = 3000, user: str = "admin", password: str | None = None, email: str = "admin@localhost") -> dict:
+    """Write app.ini (sqlite, 127.0.0.1 only, no SSH/mail/sign-up), migrate, create admin + API token, set git auth."""
+    for d in (DATA, BARE, LOG):
+        d.mkdir(parents=True, exist_ok=True)
+    st = _fstate()
+    if not INI.exists():
+        INI.write_text(APP_INI.format(home=FORGE, port=port, data=DATA, log=LOG, secret=secrets.token_urlsafe(48)))
+        INI.chmod(0o600)
+    _forge("migrate")
+    pw = password or secrets.token_urlsafe(16)
+    out = _forge("admin", "user", "create", "--admin", "--username", user, "--password", pw, "--email", email, "--must-change-password=false", check=False)
+    created = "already exists" not in out.lower()
+    tok = _forge("admin", "user", "generate-access-token", "--username", user, "--token-name", f"olnm-{int(time.time())}", "--scopes", "all", "--raw")
+    st.update(port=port, user=user, token=tok.strip().splitlines()[-1])
+    if created:
+        st["password"] = pw
+    _fsave(st)
+    if not DIAL_FILE.exists():
+        _write_dial(1)
+    basic = base64.b64encode(f"{user}:{st['token']}".encode()).decode()
+    _sh("git", "config", "--global", "--replace-all", f"http.http://localhost:{port}/.extraHeader", f"Authorization: Basic {basic}")
+    print(f"🏗️  http://localhost:{port}  user={user}" + (f"  password={pw}" if created else "  (user existed)"))
+    print(f"🔑 token → {FSTATE}   🔐 git auth → ~/.gitconfig")
+    return st
+
+
+def hub_up() -> int:
+    """Start the forge in the background."""
+    if pid := _running():
+        print(f"🏠 already up pid={pid}")
+        return pid
+    LOG.mkdir(parents=True, exist_ok=True)
+    p = subprocess.Popen([str(BIN), "--config", str(INI), "web"], stdout=(LOG / "web.out").open("a"), stderr=subprocess.STDOUT, start_new_session=True)
+    PID.write_text(str(p.pid))
+    port = hub_port()
+    for _ in range(60):
+        try:
+            _fetch(f"http://127.0.0.1:{port}/api/healthz", timeout=2)
+            print(f"🏠 up pid={p.pid} → http://localhost:{port}")
+            return p.pid
+        except (urllib.error.URLError, TimeoutError, ConnectionError):
+            time.sleep(0.5)
+    print(f"⚠️  started but health check timed out → {LOG / 'web.out'}")
+    return p.pid
+
+
+def hub_down() -> None:
+    """Stop the forge."""
+    if pid := _running():
+        os.kill(pid, signal.SIGTERM)
+        PID.unlink(missing_ok=True)
+        print(f"🛑 stopped pid={pid}")
+
+
+def hub_status() -> dict:
+    """Dial, forge state, repo count."""
+    st, pid, lv = _fstate(), _running(), read_dial()
+    print(f"🎛️  {lv} {DIALS[lv]} | {'🟢 pid=' + str(pid) if pid else '⚪ down'} | 📚 {len(st['repos'])} | http://localhost:{st['port']}")
+    return {"dial": lv, "pid": pid, "repos": st["repos"]}
+
+
+def hub_logs(n: int = 40) -> str:
+    """Tail the forge web log."""
+    f = LOG / "web.out"
+    out = "\n".join(f.read_text(errors="replace").splitlines()[-n:]) if f.exists() else "(no log yet)"
+    print(out)
+    return out
+
+
+def hub_api(method: str, path: str, data: dict | None = None, token: str | None = None, base: str | None = None):
+    """Forgejo REST (GitHub-shaped): hub_api('GET', '/user/repos')."""
+    st = _fstate()
+    url = (base or f"http://127.0.0.1:{st['port']}/api/v1") + path
+    body = json.dumps(data).encode() if data is not None else None
+    req = urllib.request.Request(url, data=body, method=method.upper(), headers={"Authorization": f"token {token or st.get('token', '')}", "Content-Type": "application/json", "Accept": "application/json"})
+    try:
+        with _open(req, 30) as r:
+            raw = r.read()
+            return json.loads(raw) if raw else None
+    except urllib.error.HTTPError as e:
+        raise SystemExit(f"❌ {method} {path} → {e.code} {e.read().decode(errors='replace')[:300]}")
+
+
+def _github_token() -> str:
+    tok = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if not tok and shutil.which("gh"):
+        tok = _sh("gh", "auth", "token", check=False)
+    if not tok:
+        raise SystemExit("❌ dial 2 mirroring needs GITHUB_TOKEN or `gh auth login`")
+    return tok
+
+
+def _ensure_forge_repo(name: str, private: bool = True) -> None:
+    if name not in {r["name"] for r in (hub_api("GET", "/user/repos?limit=200") or [])}:
+        hub_api("POST", "/user/repos", {"name": name, "private": private, "default_branch": "main", "auto_init": False})
+        print(f"  🆕 forge repo {name}")
+
+
+def _point_origin(p: Path, level: int, st: dict) -> str:
+    r = st["repos"][str(p)]
+    target = "bare" if level == 0 else ("github" if level == 3 and r.get("github") else "local")
+    url = _sh("git", "remote", "get-url", target, cwd=p, check=False) or _sh("git", "remote", "get-url", "bare", cwd=p)
+    _sh("git", "remote", "remove", "origin", cwd=p, check=False)
+    _sh("git", "remote", "add", "origin", url, cwd=p)
+    print(f"  🎯 {r['name']}: origin → {target}")
+    return target
+
+
+def _ensure_push_mirror(r: dict, st: dict) -> None:
+    if not r.get("github"):
+        return
+    orp, gh_url = f"{st['user']}/{r['name']}", f"https://github.com/{r['github']}.git"
+    if any(m.get("remote_address", "").rstrip("/") == gh_url for m in hub_api("GET", f"/repos/{orp}/push_mirrors") or []):
+        return
+    hub_api("POST", f"/repos/{orp}/push_mirrors", {"remote_address": gh_url, "remote_username": r["github"].split("/")[0], "remote_password": _github_token(), "interval": "1h", "sync_on_commit": True})
+    print(f"  🔁 push-mirror → {r['github']}")
+
+
+def _hub_apply(level: int) -> None:
+    st = _fstate()
+    if level == 0:
+        hub_down()
+    elif BIN.exists() and INI.exists():
+        hub_up()
+    for path, r in st["repos"].items():
+        p = Path(path)
+        if not p.exists():
+            continue
+        _point_origin(p, level, st)
+        if level >= 1 and _running():
+            _ensure_forge_repo(r["name"], r.get("private", True))
+            if level == 2:
+                _ensure_push_mirror(r, st)
+
+
+def hub_repo_add(path: str = ".", github: str | None = None, private: bool = True) -> dict:
+    """Register a working tree: forge repo + bare backup, remotes `local` `bare` (`github`), origin by dial."""
+    p = Path(path).resolve()
+    if not (p / ".git").exists():
+        _sh("git", "init", "-q", "-b", "main", cwd=p)
+    st, name = _fstate(), p.name
+    bare = BARE / f"{name}.git"
+    if not bare.exists():
+        bare.parent.mkdir(parents=True, exist_ok=True)
+        _sh("git", "init", "-q", "--bare", "-b", "main", str(bare))
+    if _running():
+        _ensure_forge_repo(name, private)
+    else:
+        print("⚠️  forge down; repo is created on next `olnm_dial 1` / `hubdial up`")
+    remotes = {"local": f"http://localhost:{st['port']}/{st['user']}/{name}.git", "bare": str(bare)}
+    if github:
+        remotes["github"] = f"https://github.com/{github}.git"
+    for rname, url in remotes.items():
+        _sh("git", "remote", "remove", rname, cwd=p, check=False)
+        _sh("git", "remote", "add", rname, url, cwd=p)
+    st["repos"][str(p)] = {"name": name, "github": github, "private": private}
+    _fsave(st)
+    print(f"📚 {name}  " + "  ".join(f"{k}={v}" for k, v in remotes.items()))
+    _point_origin(p, read_dial(), st)
+    return st["repos"][str(p)]
+
+
+def hub_repo_ls() -> dict:
+    """Registered repos."""
+    repos = _fstate()["repos"]
+    for path, r in repos.items():
+        print(f"📚 {r['name']:24} {path}  {('☁️ ' + r['github']) if r.get('github') else ''}")
+    return repos
+
+
+def hub_repo_rm(path: str = ".") -> None:
+    """Unregister a working tree (nothing deleted)."""
+    st = _fstate()
+    st["repos"].pop(str(Path(path).resolve()), None)
+    _fsave(st)
+    print("🗑️  unregistered")
+
+
+def hub_sync() -> dict:
+    """Push every registered repo to bare / local / github (github only at dial ≥2)."""
+    st, lv, res = _fstate(), read_dial(), {}
+    for path, r in st["repos"].items():
+        p = Path(path)
+        if not p.exists():
+            continue
+        for rem in ("bare", "local", "github"):
+            if (rem == "local" and not _running()) or (rem == "github" and lv < 2):
+                continue
+            if _sh("git", "remote", "get-url", rem, cwd=p, check=False):
+                ok = subprocess.run(["git", "push", "-q", "--all", rem], cwd=p, capture_output=True).returncode == 0
+                res[f"{r['name']}:{rem}"] = ok
+                print(f"  {'✅' if ok else '⚠️ '} {r['name']} → {rem}")
+    return res
+
+
+def _owner_repo(path: str = ".") -> str:
+    st = _fstate()
+    r = st["repos"].get(str(Path(path).resolve()))
+    if not r:
+        raise SystemExit("❌ not a registered repo → hubadd")
+    return f"{st['user']}/{r['name']}"
+
+
+def hub_issue_ls(path: str = ".", state: str = "open") -> list:
+    """Issues of the current repo."""
+    items = hub_api("GET", f"/repos/{_owner_repo(path)}/issues?state={state}&type=issues") or []
+    for i in items:
+        print(f"🐛 #{i['number']:<4} {i['title']}  {' '.join('🏷️' + l['name'] for l in i.get('labels', []))}")
+    return items
+
+
+def hub_issue_new(title: str, body: str = "", labels: list[str] | None = None, path: str = ".") -> dict:
+    """New issue; labels by name (unknown names are skipped)."""
+    orp = _owner_repo(path)
+    have = {l["name"]: l["id"] for l in hub_api("GET", f"/repos/{orp}/labels") or []} if labels else {}
+    it = hub_api("POST", f"/repos/{orp}/issues", {"title": title, "body": body, "labels": [have[n] for n in labels or [] if n in have]})
+    print(f"🐛 #{it['number']} {it['html_url']}")
+    return it
+
+
+def hub_pr_ls(path: str = ".") -> list:
+    """Open pull requests."""
+    items = hub_api("GET", f"/repos/{_owner_repo(path)}/pulls?state=open") or []
+    for p in items:
+        print(f"🔀 #{p['number']:<4} {p['head']['ref']} → {p['base']['ref']}  {p['title']}")
+    return items
+
+
+def hub_pr_new(title: str, head: str | None = None, base: str = "main", body: str = "", path: str = ".") -> dict:
+    """PR from the current branch (pushed to `local` first)."""
+    p = Path(path).resolve()
+    head = head or _sh("git", "branch", "--show-current", cwd=p)
+    _sh("git", "push", "-q", "-u", "local", head, cwd=p)
+    pr = hub_api("POST", f"/repos/{_owner_repo(path)}/pulls", {"title": title, "head": head, "base": base, "body": body})
+    print(f"🔀 #{pr['number']} {pr['html_url']}")
+    return pr
+
+
+def hub_labels(path: str = ".") -> None:
+    """GitHub's default labels (bug, enhancement, …) in the current repo."""
+    orp = _owner_repo(path)
+    have = {l["name"] for l in hub_api("GET", f"/repos/{orp}/labels") or []}
+    for name, color in GH_LABELS.items():
+        if name not in have:
+            hub_api("POST", f"/repos/{orp}/labels", {"name": name, "color": "#" + color})
+    print(f"🏷️  labels ready in {orp}")
+
+
+def hub_doctor() -> dict:
+    """Binary, config, token, forge, git, gh, GitHub reachability."""
+    st = _fstate()
+    checks = {"forgejo": BIN.exists(), "app.ini": INI.exists(), "token": bool(st.get("token")), "forge up": bool(_running()), "git": bool(shutil.which("git")), "gh": bool(shutil.which("gh"))}
+    try:
+        _fetch("https://api.github.com", timeout=5)
+        checks["github 🌍"] = True
+    except Exception:
+        checks["github 🌍"] = False
+    print(" ".join(("✅ " if v else "❌ ") + k for k, v in checks.items()))
+    return checks
+
+
 # ───────────────────────── 🐚 shell ─────────────────────────
+HUB_SUBS = "install bundle init up down status doctor logs dial repo api issue pr labels sync"
+
+
 def init(shell: str | None = None) -> str:
     """Shell code to eval: functions + dial stubs + typo hook + completion."""
     shell = shell or ("zsh" if "zsh" in os.environ.get("SHELL", "") else "bash")
-    parts = [f'OLNM_PY="{PY}"', f'DIAL_FILE="${{DIAL_FILE:-{DIAL_FILE}}}"', META, SHELL]
+    parts = [f'OLNM_PY="{PY}"', f'OLNM_HOME="${{OLNM_HOME:-{OLNM_HOME}}}"', f'DIAL_FILE="${{DIAL_FILE:-{DIAL_FILE}}}"', META, SHELL]
     if read_dial() <= 1:
         for e in entries():
             if e["net"]:
                 parts.append(f'{e["name"]}() {{ echo "🔌 {e["name"]}: 🌍 needs dial ≥2 (now $(_olnm_d)) → olnm_dial 2" >&2; return 1; }}')
     secs = " ".join(_sections())
     if shell == "zsh":
-        parts.append("command_not_found_handler() { _olnm_cnf \"$@\"; }")
-        parts.append(f'(( $+functions[compdef] )) && compdef "_arguments \\"1:section:({secs})\\"" olnm olnm_offline')
+        parts.append('command_not_found_handler() { _olnm_cnf "$@"; }')
+        parts.append(f'(( $+functions[compdef] )) && {{ compdef "_arguments \\"1:section:({secs})\\"" olnm olnm_offline; compdef "_arguments \\"1:sub:({HUB_SUBS})\\"" hubdial; }}')
     else:
-        parts.append("command_not_found_handle() { _olnm_cnf \"$@\"; }")
-        parts.append(f'complete -W "{secs}" olnm olnm_offline')
-        parts.append('complete -W "0 1 2 3" olnm_dial')
+        parts.append('command_not_found_handle() { _olnm_cnf "$@"; }')
+        parts.append(f'complete -W "{secs}" olnm olnm_offline; complete -W "0 1 2 3" olnm_dial; complete -W "{HUB_SUBS}" hubdial')
     code = "\n".join(parts) + "\n"
     print(code, end="")
     return code
@@ -650,23 +1095,29 @@ def run(name: str, *args: str) -> int:
     if name not in names():
         like(name, hint=True)
         return 127
-    script = f'eval "$(python3 "{PY}" init bash)"; {name} "$@"'
-    return subprocess.run(["bash", "-c", script, name, *args]).returncode
+    return subprocess.run(["bash", "-c", f'eval "$(python3 "{PY}" init bash)"; {name} "$@"', name, *args]).returncode
 
 
 def doctor() -> dict:
-    """Which optional tools are on PATH, and the current dial."""
+    """Optional tools on PATH, the dial, and the forge if set up."""
     res = {t: bool(shutil.which(t)) for t in TOOLS}
     print(" ".join(("✅ " if v else "❌ ") + k for k, v in res.items()))
     dial()
+    if FSTATE.exists():
+        hub_status()
     return res
 
 
+def public() -> list[str]:
+    """Names callable through `call`."""
+    return sorted(n for n, v in globals().items() if callable(v) and getattr(v, "__module__", "") == __name__ and n[0].islower() and n not in {"main", "call", "build_parser"})
+
+
 def call(fn: str, args: list | None = None, kwargs: dict | None = None):
-    """Call a public function by name; result printed as JSON by the CLI."""
+    """Call a public function by name; the CLI prints the result as JSON (progress goes to stderr)."""
     f = globals().get(fn)
     if fn.startswith("_") or not callable(f) or fn in {"main", "call", "build_parser"}:
-        raise SystemExit(f"❌ no function {fn!r}")
+        raise SystemExit(f"❌ no function {fn!r} → {' '.join(public())}")
     return f(*(args or []), **(kwargs or {}))
 
 
@@ -682,7 +1133,43 @@ def build_parser() -> argparse.ArgumentParser:
     s = sp.add_parser("dial", help="🎛️ show/set dial"); s.add_argument("level", nargs="?", type=int, choices=sorted(DIALS))
     s = sp.add_parser("run", help="▶️ run one one-liner in bash"); s.add_argument("name"); s.add_argument("args", nargs=argparse.REMAINDER)
     s = sp.add_parser("call", help="🔌 call a function by name → JSON"); s.add_argument("fn"); s.add_argument("args", nargs="?", default="[]"); s.add_argument("--kwargs", default="{}")
+    s = sp.add_parser("hub", help="🏠 local GitHub-like forge"); h = s.add_subparsers(dest="sub", required=True)
+    x = h.add_parser("install", help="📦 🌍 download or --from carried binary"); x.add_argument("--version", default="latest"); x.add_argument("--from", dest="src"); x.add_argument("--sha256", dest="sha")
+    x = h.add_parser("bundle", help="🎒 🌍 binary + .sha256 + olnm.py into DIR"); x.add_argument("dir"); x.add_argument("--version", default="latest")
+    x = h.add_parser("init", help="🏗️ config, db, admin, token"); x.add_argument("--port", type=int, default=3000); x.add_argument("--user", default="admin"); x.add_argument("--password")
+    for name, hp in (("up", "🟢 start"), ("down", "🛑 stop"), ("status", "📊 status"), ("doctor", "🩺 checks"), ("sync", "🔄 push to all remotes"), ("labels", "🏷️ GitHub default labels")):
+        h.add_parser(name, help=hp)
+    x = h.add_parser("logs", help="📜 tail log"); x.add_argument("-n", type=int, default=40)
+    x = h.add_parser("dial", help="🎛️ same as olnm dial"); x.add_argument("level", nargs="?", type=int, choices=sorted(DIALS))
+    x = h.add_parser("repo", help="📚 register working trees"); r = x.add_subparsers(dest="repo_cmd", required=True)
+    y = r.add_parser("add"); y.add_argument("path", nargs="?", default="."); y.add_argument("--github", help="owner/name"); y.add_argument("--public", action="store_true")
+    r.add_parser("ls"); y = r.add_parser("rm"); y.add_argument("path", nargs="?", default=".")
+    x = h.add_parser("api", help="🌐 raw REST"); x.add_argument("method", choices=["GET", "POST", "PATCH", "PUT", "DELETE"]); x.add_argument("path"); x.add_argument("--data", help="JSON body")
+    x = h.add_parser("issue", help="🐛 issues"); i = x.add_subparsers(dest="issue_cmd", required=True)
+    y = i.add_parser("ls"); y.add_argument("--state", default="open", choices=["open", "closed", "all"])
+    y = i.add_parser("new"); y.add_argument("title"); y.add_argument("--body", default=""); y.add_argument("--label", action="append", default=[])
+    x = h.add_parser("pr", help="🔀 pull requests"); p = x.add_subparsers(dest="pr_cmd", required=True)
+    p.add_parser("ls"); y = p.add_parser("new"); y.add_argument("title"); y.add_argument("--head"); y.add_argument("--base", default="main"); y.add_argument("--body", default="")
     return ap
+
+
+def _hub_main(a: argparse.Namespace) -> None:
+    match a.sub:
+        case "install": hub_install(a.version, a.src, a.sha)
+        case "bundle": hub_bundle(a.dir, a.version)
+        case "init": hub_init(a.port, a.user, a.password)
+        case "up": hub_up()
+        case "down": hub_down()
+        case "status": hub_status()
+        case "doctor": hub_doctor()
+        case "sync": hub_sync()
+        case "labels": hub_labels()
+        case "logs": hub_logs(a.n)
+        case "dial": dial(a.level)
+        case "repo": {"add": lambda: hub_repo_add(a.path, a.github, not a.public), "ls": hub_repo_ls, "rm": lambda: hub_repo_rm(a.path)}[a.repo_cmd]()
+        case "api": print(json.dumps(hub_api(a.method, a.path, json.loads(a.data) if a.data else None), indent=2, ensure_ascii=False))
+        case "issue": hub_issue_ls(state=a.state) if a.issue_cmd == "ls" else hub_issue_new(a.title, a.body, a.label)
+        case "pr": hub_pr_ls() if a.pr_cmd == "ls" else hub_pr_new(a.title, a.head, a.base, a.body)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -697,9 +1184,9 @@ def main(argv: list[str] | None = None) -> int:
         case "doctor": doctor()
         case "dial": dial(a.level)
         case "run": return run(a.name, *a.args)
+        case "hub": _hub_main(a)
         case "call":
-            import contextlib, io
-            with contextlib.redirect_stdout(io.StringIO()):
+            with contextlib.redirect_stdout(sys.stderr):
                 out = call(a.fn, json.loads(a.args), json.loads(a.kwargs))
             print(json.dumps(out, ensure_ascii=False, default=str))
     return 0

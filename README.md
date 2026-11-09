@@ -1,6 +1,6 @@
 # 🧷 OneLinearNumerousMemo (olnm)
 
-bash/zsh 用ワンライナー集。**Python 1 ファイル**（`olnm.py`）が中にシェル関数を持ち、`eval` で読み込む形。
+bash/zsh 用ワンライナー集 + ローカル GitHub（Forgejo）。**Python 1 ファイル**（`olnm.py`、標準ライブラリのみ）が中にシェル関数を持ち、`eval` で読み込む形。
 想定: Ubuntu 26.04、Python / Node(LTS) / uv はある前提（Bun・fzf・fd・rg・jq・gh・docker は任意）。
 
 ## 導入
@@ -16,25 +16,42 @@ curl -fsSL <RAW_URL>/olnm.py -o ~/.olnm.py && echo 'eval "$(python3 ~/.olnm.py i
 | `olnm_grep json` | 🔎 説明文を検索 |
 | `olnm_like uvtets` | 🤔 近い名前。打ち間違えると自動で「did you mean」 |
 | `olnm_offline` / `olnm_net` | 🔒 ネット不要なもの / 🌍 ネットが要るもの |
-| `olnm_dial 0..3` | 🎛️ ダイヤル（hubdial と共有） |
+| `olnm_dial 0..3` | 🎛️ ダイヤル（ローカル forge の起動停止・origin の向き先も連動） |
 | `olnm_doctor` / `olnm_edit` / `olnm_reload` | 🩺 📝 🔄 |
 
 ## 🎛️ ダイヤル
-`$DIAL_FILE`（既定 `~/.config/dial`）の数字 1 つを hubdial と共有。未設定は 3。
+`$DIAL_FILE`（既定 `~/.olnm/dial`）に数字 1 つ。未設定は 3（普通のオンライン端末）。
 
-| | 🌍 付き | 🎛️ 付き（ghpr ghprs ghis ghisn） | gp / gpl |
-|---|---|---|---|
-| 0 🔌 offline | 止める（スタブ） | hubdial へ | origin = bare |
-| 1 🏠 local | 止める | hubdial へ | origin = ローカル forge |
-| 2 🔁 mirror | 動く | hubdial へ | origin = ローカル forge |
-| 3 ☁️ github | 動く | gh へ | origin = GitHub |
+| | 🌍 付き | 🎛️ 付き（ghpr ghprs ghis ghisn ghweb） | origin（gp / gpl） | forge |
+|---|---|---|---|---|
+| 0 🔌 offline | 止める（スタブ） | ローカル forge へ | bare | 停止 |
+| 1 🏠 local | 止める | ローカル forge へ | ローカル forge | 起動 |
+| 2 🔁 mirror | 動く | ローカル forge へ | ローカル forge | 起動・GitHub へ push mirror |
+| 3 ☁️ github | 動く | gh へ | GitHub | 起動（バックアップ） |
+
+## 🏠 hub（ローカル GitHub）
+中身は [Forgejo](https://forgejo.org)（単一バイナリ、Issue・PR・Actions 互換 CI）。設定は sqlite・127.0.0.1 のみ・SSH/メール/新規登録なし。
+```sh
+hubdial install        # 🌍 バイナリ取得 + sha256 照合（→ ~/.olnm/forge/bin）
+hubdial init           # 🏗️ admin・API トークン作成、git 認証を ~/.gitconfig へ、ダイヤルを 1 に
+hubdial up             # 🟢 http://localhost:3000（hubopen でブラウザ）
+cd myrepo && hubadd --github owner/name   # 📚 remote に local / bare / github、origin はダイヤル次第
+ghisn "crash" bug ; ghis ; ghpr "fix"     # 🐛🔀 ダイヤル ≤2 ならローカル forge に行く
+olnm_dial 2            # 🔁 GitHub へ push mirror（GITHUB_TOKEN か gh auth が必要）
+hubsync                # 🔄 bare / local /（≥2 なら）github へまとめて push
+```
+閉域網へ持ち込み: オンライン側で `hubdial bundle ./carry`（バイナリ + .sha256 + olnm.py）→ 閉域側で `python3 carry/olnm.py hub install --from carry/forgejo-*-linux-amd64`。
+ほか `hubdial status | doctor | logs | labels（GitHub 既定ラベル）| api GET /user/repos | repo ls | pr ls`。
 
 ## 🔒 閉域網向け（airgap セクション）
 `uvbundle` → `uvoffline` / `nbundle` → `nci` / `gbundle` `gunbundle` / `hashdir` `verifydir` / `secrets` / `redact` / `proxyon` `cabundle` / `noenv` `sandbox` / `envreport` `licenses`
 
 ## Python / Node / Bun から
 ```python
-import olnm; olnm.like("uvtets")
+import olnm; olnm.like("uvtets"); olnm.dial(1); olnm.hub_issue_new("crash", labels=["bug"])
+```
+```sh
+python3 olnm.py call hub_repo_ls     # 任意の関数を名前で → JSON（進捗は stderr）
 ```
 ```js
 require("child_process").execFileSync("python3", ["olnm.py", "run", "pycalc", "6*7"]).toString()   // "42"
@@ -45,5 +62,5 @@ require("child_process").execFileSync("python3", ["olnm.py", "run", "pycalc", "6
 
 ## テスト
 ```sh
-python3 -m unittest discover
+python3 -m unittest discover     # Forgejo 本体は不要（tests/fake_forgejo.py が CLI と REST の一部を代行）
 ```

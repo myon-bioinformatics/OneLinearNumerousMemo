@@ -1,14 +1,26 @@
 """🧪 olnm tests — `python -m unittest discover`."""
 import json, os, re, shutil, subprocess, sys, tempfile, unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 TMP = Path(tempfile.mkdtemp(prefix="olnm-"))
-os.environ["DIAL_FILE"] = str(TMP / "dial")
+os.environ.update(OLNM_HOME=str(TMP / "home"), DIAL_FILE=str(TMP / "dial"), GIT_CONFIG_GLOBAL=str(TMP / "gitconfig"))
 sys.path.insert(0, str(ROOT))
 import olnm  # noqa: E402
 
 PY = str(ROOT / "olnm.py")
+PORT = 3777
+
+
+def git(*a, cwd):
+    return subprocess.run(["git", *a], cwd=cwd, text=True, capture_output=True, check=True).stdout.strip()
+
+
+def reset_forge():
+    olnm.hub_down()
+    shutil.rmtree(olnm.FORGE, ignore_errors=True)
+    olnm.DIAL_FILE.unlink(missing_ok=True)
 
 
 def bash(script: str, path_extra: str = "") -> subprocess.CompletedProcess:
@@ -61,7 +73,7 @@ class TestHelpers(unittest.TestCase):
 
 class TestDial(unittest.TestCase):
     def setUp(self):
-        olnm.DIAL_FILE.unlink(missing_ok=True)
+        reset_forge()
 
     def test_default_dial_is_3_and_net_allowed(self):
         self.assertEqual(olnm.read_dial(), 3)
@@ -75,17 +87,116 @@ class TestDial(unittest.TestCase):
         olnm.dial(2)
         self.assertNotIn("needs dial", bash("declare -f myip").stdout)
 
-    def test_gh_routes_to_hubdial_at_dial_le_2(self):
-        fake = TMP / "bin"; fake.mkdir(exist_ok=True)
-        (fake / "hubdial").write_text('#!/bin/sh\necho "HUBDIAL $*"\n'); (fake / "hubdial").chmod(0o755)
-        olnm.DIAL_FILE.write_text("1\n")
-        self.assertEqual(bash("ghisn crash bug", str(fake)).stdout.strip(), "HUBDIAL issue new crash --label bug")
-        self.assertEqual(bash("ghprs", str(fake)).stdout.strip(), "HUBDIAL pr ls")
+class HubBase(unittest.TestCase):
+    def setUp(self):
+        reset_forge()
+        olnm.BIN.parent.mkdir(parents=True)
+        shutil.copy(ROOT / "tests" / "fake_forgejo.py", olnm.BIN); olnm.BIN.chmod(0o755)
+        self.wt = TMP / "wt"; shutil.rmtree(self.wt, ignore_errors=True); self.wt.mkdir()
+        git("init", "-q", "-b", "main", cwd=self.wt)
+        (self.wt / "a").write_text("a"); git("add", ".", cwd=self.wt)
+        git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init", cwd=self.wt)
+
+    def tearDown(self):
+        olnm.hub_down()
+
+
+class TestHubInit(HubBase):
+    def test_init_writes_ini_token_dial_and_git_auth(self):
+        st = olnm.hub_init(port=PORT, password="pw")
+        ini = olnm.INI.read_text()
+        for line in (f"HTTP_PORT = {PORT}", "HTTP_ADDR = 127.0.0.1", "DISABLE_SSH = true", "OFFLINE_MODE = true", "DB_TYPE = sqlite3"):
+            self.assertIn(line, ini)
+        self.assertTrue(st["token"].startswith("fake-token"))
+        self.assertEqual(oct(olnm.FSTATE.stat().st_mode)[-3:], "600")
+        self.assertEqual(olnm.read_dial(), 1)
+        self.assertIn("Authorization: Basic", git("config", "--global", f"http.http://localhost:{PORT}/.extraHeader", cwd=TMP))
+
+    def test_up_down_idempotent(self):
+        olnm.hub_init(port=PORT, password="pw")
+        pid = olnm.hub_up(); self.assertTrue(olnm._running())
+        self.assertEqual(olnm.hub_up(), pid)
+        olnm.hub_down(); self.assertFalse(olnm._running())
+
+    def test_install_from_carried_file_checks_sidecar(self):
+        src = TMP / "forgejo-9.9.9-linux-amd64"; src.write_bytes(b"binary")
+        side = TMP / "forgejo-9.9.9-linux-amd64.sha256"
+        side.write_text("deadbeef  x\n")
+        with self.assertRaises(SystemExit):
+            olnm.hub_install(src=str(src))
+        side.write_text(olnm._sha256(src) + "  x\n")
+        olnm.hub_install(src=str(src)); self.assertEqual(olnm.BIN.read_bytes(), b"binary")
+
+
+class TestHub(HubBase):
+    def setUp(self):
+        super().setUp(); olnm.hub_init(port=PORT, password="pw"); olnm.hub_up()
+
+    def test_repo_add_creates_forge_repo_and_remotes(self):
+        olnm.hub_repo_add(str(self.wt), github="me/wt")
+        self.assertEqual(set(git("remote", cwd=self.wt).split()), {"origin", "local", "bare", "github"})
+        self.assertEqual([r["name"] for r in olnm.hub_api("GET", "/user/repos")], ["wt"])
+        olnm.hub_repo_add(str(self.wt), github="me/wt")
+        self.assertEqual(len(olnm.hub_api("GET", "/user/repos")), 1)
+
+    def test_dial_moves_origin_and_forge(self):
+        olnm.hub_repo_add(str(self.wt), github="me/wt")
+        origin = lambda: git("remote", "get-url", "origin", cwd=self.wt)
+        olnm.dial(0); self.assertEqual(origin(), str(olnm.BARE / "wt.git")); self.assertFalse(olnm._running())
+        olnm.dial(1); self.assertIn(f"localhost:{PORT}/admin/wt.git", origin()); self.assertTrue(olnm._running())
+        olnm.dial(3); self.assertEqual(origin(), "https://github.com/me/wt.git")
+        self.assertEqual(olnm.read_dial(), 3)
+
+    @mock.patch.object(olnm, "_github_token", return_value="ghtok")
+    def test_dial2_push_mirror_once(self, _tok):
+        olnm.hub_repo_add(str(self.wt), github="me/wt")
+        olnm.dial(2); olnm.dial(2)
+        mirrors = olnm.hub_api("GET", "/repos/admin/wt/push_mirrors")
+        self.assertEqual(len(mirrors), 1)
+        self.assertEqual(mirrors[0]["remote_address"], "https://github.com/me/wt.git")
+
+    def test_labels_and_issues(self):
+        olnm.hub_repo_add(str(self.wt))
+        olnm.hub_labels(str(self.wt)); olnm.hub_labels(str(self.wt))
+        names = [l["name"] for l in olnm.hub_api("GET", "/repos/admin/wt/labels")]
+        self.assertIn("bug", names); self.assertEqual(len(names), len(set(names)))
+        it = olnm.hub_issue_new("crash", labels=["bug", "nope"], path=str(self.wt))
+        self.assertEqual([l["name"] for l in it["labels"]], ["bug"])
+        self.assertEqual([i["title"] for i in olnm.hub_issue_ls(str(self.wt))], ["crash"])
+
+    def test_sync_bare_and_skip_github_below_dial2(self):
+        olnm.hub_repo_add(str(self.wt), github="me/wt")
+        res = olnm.hub_sync()
+        self.assertTrue(res["wt:bare"]); self.assertNotIn("wt:github", res)
+        self.assertEqual(git("--git-dir", str(olnm.BARE / "wt.git"), "rev-parse", "main", cwd=TMP), git("rev-parse", "main", cwd=self.wt))
+
+    def test_bad_token(self):
+        with self.assertRaises(SystemExit) as e:
+            olnm.hub_api("GET", "/user/repos", token="wrong")
+        self.assertIn("401", str(e.exception))
+
+    def test_shell_gh_routes_to_forge_at_dial_le_2(self):
+        olnm.hub_repo_add(str(self.wt))
+        r = bash(f"cd {self.wt} && ghisn crash bug && ghis && hubopen")
+        self.assertIn("🐛 #1", r.stdout); self.assertIn("crash", r.stdout); self.assertIn(f"localhost:{PORT}/", r.stdout)
         olnm.DIAL_FILE.write_text("3\n")
-        self.assertEqual(bash("_olnm_hub && echo HUBDIAL || echo GH", str(fake)).stdout.strip(), "GH")
+        self.assertEqual(bash("_olnm_hub && echo HUB || echo GH").stdout.strip(), "GH")
+
+    def test_cli_parser(self):
+        ap = olnm.build_parser()
+        self.assertEqual(ap.parse_args(["hub", "dial", "2"]).level, 2)
+        self.assertEqual(ap.parse_args(["hub", "issue", "new", "t", "--label", "bug"]).label, ["bug"])
+        for bad in (["dial", "9"], ["hub", "api", "FETCH", "/x"], ["hub"]):
+            with self.assertRaises(SystemExit):
+                ap.parse_args(bad)
 
 
 class TestInterop(unittest.TestCase):
+    def test_call_rejects_private(self):
+        for name in ("_hub_apply", "main", "nope"):
+            with self.assertRaises(SystemExit):
+                olnm.call(name)
+
     def test_cli_call_json(self):
         out = subprocess.run([sys.executable, PY, "call", "like", '["uvtets"]'], text=True, capture_output=True, check=True).stdout
         self.assertEqual(json.loads(out)[0], "uvtest")
