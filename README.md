@@ -41,6 +41,11 @@ olnm_dial 2            # 🔁 GitHub へ push mirror（GITHUB_TOKEN か gh auth 
 hubsync                # 🔄 bare / local /（≥2 なら）github へまとめて push
 ```
 閉域網へ持ち込み: オンライン側で `hubdial bundle ./carry`（バイナリ + .sha256 + olnm.py）→ 閉域側で `python3 carry/olnm.py hub install --from carry/forgejo-*-linux-amd64`。
+
+- 🧬 `--flavor gitea`（install / bundle）: Codeberg が塞がれていて GitHub は通る環境向け。Gitea は Forgejo の元で、CLI も API も同じ形なので olnm からの使い方は変わらない
+- 👤 forge は root では起動しない（Forgejo / Gitea の仕様）。普通のユーザーで使う
+- 🐹 Go は不要（配布済みバイナリを使う。ソースからビルドするときだけ要る）
+- ✅ 実機確認: Gitea 1.24.6 で install / bundle / init / up / repo add / push / labels / issue / PR / dial 0〜3 / sync / push mirror 登録
 ほか `hubdial status | doctor | logs | labels（GitHub 既定ラベル）| api GET /user/repos | repo ls | pr ls`。
 
 ## 🔒 閉域網向け（airgap セクション）

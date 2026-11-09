@@ -128,6 +128,24 @@ class TestHubInit(HubBase):
         olnm.hub_install(src=str(src)); self.assertEqual(olnm.BIN.read_bytes(), b"binary")
 
 
+    def test_bundle_flavor_urls_and_sha_check(self):
+        seen = []
+        def fake_fetch(url, dest=None, timeout=0):
+            seen.append(url)
+            data = b"bin" if not url.endswith(".sha256") else (olnm.hashlib.sha256(b"bin").hexdigest() + "  x\n").encode()
+            if dest:
+                dest.parent.mkdir(parents=True, exist_ok=True); dest.write_bytes(data)
+            return data
+        with mock.patch.object(olnm, "_fetch", fake_fetch):
+            path = olnm.hub_bundle(str(TMP / "carry"), version="1.2.3", flavor="gitea")
+        self.assertEqual(seen[0], "https://github.com/go-gitea/gitea/releases/download/v1.2.3/gitea-1.2.3-linux-amd64")
+        self.assertEqual(path.name, "gitea-1.2.3-linux-amd64")
+        self.assertTrue((TMP / "carry" / "olnm.py").exists())
+        with mock.patch.object(olnm, "_fetch", lambda url, dest=None, timeout=0: b"bin" if not url.endswith(".sha256") else b"bad  x"):
+            with self.assertRaises(SystemExit):
+                olnm.hub_bundle(str(TMP / "carry2"), version="1.2.3")
+
+
 class TestHub(HubBase):
     def setUp(self):
         super().setUp(); olnm.hub_init(port=PORT, password="pw"); olnm.hub_up()
@@ -164,6 +182,15 @@ class TestHub(HubBase):
         self.assertEqual([l["name"] for l in it["labels"]], ["bug"])
         self.assertEqual([i["title"] for i in olnm.hub_issue_ls(str(self.wt))], ["crash"])
 
+    def test_pr_waits_for_branch_then_opens(self):
+        olnm.hub_repo_add(str(self.wt))
+        git("switch", "-qc", "fix", cwd=self.wt)
+        bare = olnm.BARE / "wt.git"
+        git("remote", "set-url", "local", str(bare), cwd=self.wt)  # fake forge has no git transport; push lands in bare
+        pr = olnm.hub_pr_new("fix crash", path=str(self.wt))
+        self.assertEqual((pr["number"], pr["head"]["ref"], pr["base"]["ref"]), (1, "fix", "main"))
+        self.assertEqual([p["title"] for p in olnm.hub_pr_ls(str(self.wt))], ["fix crash"])
+
     def test_sync_bare_and_skip_github_below_dial2(self):
         olnm.hub_repo_add(str(self.wt), github="me/wt")
         res = olnm.hub_sync()
@@ -186,7 +213,8 @@ class TestHub(HubBase):
         ap = olnm.build_parser()
         self.assertEqual(ap.parse_args(["hub", "dial", "2"]).level, 2)
         self.assertEqual(ap.parse_args(["hub", "issue", "new", "t", "--label", "bug"]).label, ["bug"])
-        for bad in (["dial", "9"], ["hub", "api", "FETCH", "/x"], ["hub"]):
+        self.assertEqual(ap.parse_args(["hub", "install", "--flavor", "gitea"]).flavor, "gitea")
+        for bad in (["dial", "9"], ["hub", "api", "FETCH", "/x"], ["hub"], ["hub", "install", "--flavor", "gitlab"]):
             with self.assertRaises(SystemExit):
                 ap.parse_args(bad)
 

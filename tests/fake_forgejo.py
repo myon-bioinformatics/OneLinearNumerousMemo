@@ -40,19 +40,22 @@ elif cmd == "web":
                     db["repos"][body["name"]] = {"name": body["name"], "private": body.get("private", True)}
                     return self.reply(201, db["repos"][body["name"]])
                 return self.reply(200, list(db["repos"].values()))
+            if m := re.fullmatch(r"/api/v1/repos/[^/]+/([^/]+)/branches/(.+)", path):
+                db["polls"] = db.get("polls", 0) + 1
+                return self.reply(200, {"name": m.group(2)}) if db["polls"] > 1 else self.reply(404, {"message": "not yet"})
             m = re.fullmatch(r"/api/v1/repos/([^/]+)/([^/]+)/(labels|issues|pulls|push_mirrors)", path)
             if not m or m.group(2) not in db["repos"]:
                 return self.reply(404, {"message": "not found"})
             repo, kind = m.group(2), m.group(3)
-            if kind == "pulls":
-                return self.reply(200, [])
-            store = db[{"labels": "labels", "issues": "issues", "push_mirrors": "mirrors"}[kind]].setdefault(repo, [])
+            store = db.setdefault({"labels": "labels", "issues": "issues", "push_mirrors": "mirrors", "pulls": "pulls"}[kind], {}).setdefault(repo, [])
             if method == "GET":
                 return self.reply(200, store)
             item = dict(body, id=len(store) + 1)
             if kind == "issues":
                 labels = {l["id"]: l for l in db["labels"].get(repo, [])}
                 item.update(number=item["id"], html_url=f"http://localhost:{port}/x/{repo}/issues/{item['id']}", labels=[labels[i] for i in body.get("labels", [])])
+            if kind == "pulls":
+                item.update(number=item["id"], html_url=f"http://localhost:{port}/x/{repo}/pulls/{item['id']}", head={"ref": body["head"]}, base={"ref": body["base"]})
             if kind == "push_mirrors":
                 item.pop("remote_password", None)
             store.append(item)

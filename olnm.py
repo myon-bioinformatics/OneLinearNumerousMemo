@@ -647,11 +647,15 @@ def dial(level: int | None = None) -> int:
 
 # ───────────────────────── 🏠 hub: local GitHub-like forge (Forgejo) ─────────────────────────
 FORGE = OLNM_HOME / "forge"
-BIN, DATA, BARE, LOG = FORGE / "bin" / "forgejo", FORGE / "data", FORGE / "bare", FORGE / "log"
+BIN, DATA, BARE, LOG = FORGE / "bin" / "forge", FORGE / "data", FORGE / "bare", FORGE / "log"
 INI, PID, FSTATE = FORGE / "app.ini", FORGE / "forgejo.pid", FORGE / "state.json"
-RELEASES = "https://{host}/forgejo/forgejo/releases/download/v{v}/forgejo-{v}-linux-{arch}"
-API_LATEST = "https://{host}/api/v1/repos/forgejo/forgejo/releases/latest"
-HOSTS = ("codeberg.org", "code.forgejo.org")
+# 🧬 flavors: Forgejo (default, Codeberg) or Gitea (same CLI + API, released on GitHub — often reachable where Codeberg is not)
+FLAVORS = {
+    "forgejo": {"urls": ("https://codeberg.org/forgejo/forgejo/releases/download/v{v}/forgejo-{v}-linux-{arch}", "https://code.forgejo.org/forgejo/forgejo/releases/download/v{v}/forgejo-{v}-linux-{arch}"),
+                "latest": ("https://codeberg.org/api/v1/repos/forgejo/forgejo/releases/latest", "https://code.forgejo.org/api/v1/repos/forgejo/forgejo/releases/latest")},
+    "gitea": {"urls": ("https://github.com/go-gitea/gitea/releases/download/v{v}/gitea-{v}-linux-{arch}", "https://dl.gitea.com/gitea/{v}/gitea-{v}-linux-{arch}"),
+              "latest": ("https://api.github.com/repos/go-gitea/gitea/releases/latest", "https://github.com/go-gitea/gitea/releases/latest")},
+}
 GH_LABELS = {"bug": "d73a4a", "enhancement": "a2eeef", "documentation": "0075ca", "question": "d876e3", "help wanted": "008672", "good first issue": "7057ff", "wontfix": "ffffff", "duplicate": "cfd3d7"}
 APP_INI = """\
 APP_NAME = olnm hub
@@ -732,7 +736,7 @@ def _fsave(st: dict) -> None:
 
 def _forge(*args: str, check: bool = True) -> str:
     if not BIN.exists():
-        raise SystemExit("❌ forgejo binary missing → hubdial install")
+        raise SystemExit("❌ forge binary missing → hubdial install")
     return _sh(str(BIN), "--config", str(INI), *args, check=check)
 
 
@@ -752,31 +756,37 @@ def hub_port() -> int:
     return _fstate()["port"]
 
 
-def _latest_version() -> str:
-    for host in HOSTS:
+def _latest_version(flavor: str = "forgejo") -> str:
+    for url in FLAVORS[flavor]["latest"]:
         try:
-            return json.loads(_fetch(API_LATEST.format(host=host), timeout=20))["tag_name"].lstrip("v")
-        except (urllib.error.URLError, KeyError, json.JSONDecodeError, TimeoutError):
+            if url.startswith("https://github.com/"):  # release page redirects to /tag/vX.Y.Z
+                with _open(urllib.request.Request(url, headers={"User-Agent": "olnm"}), 20) as r:
+                    return r.geturl().rsplit("/v", 1)[1]
+            return json.loads(_fetch(url, timeout=20))["tag_name"].lstrip("v")
+        except (urllib.error.URLError, KeyError, IndexError, json.JSONDecodeError, TimeoutError):
             continue
-    raise SystemExit("❌ cannot reach release API (offline?) → hubdial install --from FILE")
+    other = "gitea" if flavor == "forgejo" else "forgejo"
+    raise SystemExit(f"❌ cannot reach {flavor} releases → try --flavor {other}, or install --from FILE")
 
 
-def hub_bundle(dest: str = "carry", version: str = "latest", arch: str = "amd64") -> Path:
-    """🌍 Download forgejo + .sha256 into DEST and copy olnm.py beside it — carry DEST into a closed network."""
-    v = _latest_version() if version == "latest" else version
+def hub_bundle(dest: str = "carry", version: str = "latest", arch: str = "amd64", flavor: str = "forgejo") -> Path:
+    """🌍 Download the forge binary + .sha256 into DEST and copy olnm.py beside it — carry DEST into a closed network."""
+    if flavor not in FLAVORS:
+        raise SystemExit(f"❌ flavor must be one of {', '.join(FLAVORS)}")
+    v = _latest_version(flavor) if version == "latest" else version
     out = Path(dest)
-    name = f"forgejo-{v}-linux-{arch}"
-    for host in HOSTS:
-        url = RELEASES.format(host=host, v=v, arch=arch)
+    name = f"{flavor}-{v}-linux-{arch}"
+    for tmpl in FLAVORS[flavor]["urls"]:
+        url = tmpl.format(v=v, arch=arch)
         try:
             print(f"⬇️  {url}")
             binary = _fetch(url, out / name, timeout=900)
             want = _fetch(url + ".sha256", out / f"{name}.sha256", timeout=60).split()[0].decode()
             break
         except urllib.error.URLError as e:
-            print(f"⚠️  {host}: {e}")
+            print(f"⚠️  {url.split('/')[2]}: {e}")
     else:
-        raise SystemExit("❌ download failed on all hosts")
+        raise SystemExit(f"❌ download failed on all hosts → try --flavor {'gitea' if flavor == 'forgejo' else 'forgejo'}")
     if hashlib.sha256(binary).hexdigest() != want:
         raise SystemExit("❌ sha256 mismatch")
     shutil.copy2(PY, out / "olnm.py")
@@ -784,16 +794,18 @@ def hub_bundle(dest: str = "carry", version: str = "latest", arch: str = "amd64"
     return out / name
 
 
-def hub_install(version: str = "latest", src: str | None = None, sha: str | None = None) -> Path:
-    """Place forgejo at ~/.olnm/forge/bin. Online: download+verify. Offline: --from carried file (checked against sha or sidecar .sha256)."""
+def hub_install(version: str = "latest", src: str | None = None, sha: str | None = None, flavor: str = "forgejo") -> Path:
+    """Place the forge binary at ~/.olnm/forge/bin/forge. Online: download+verify. Offline: --from carried file (checked against sha or sidecar .sha256)."""
     if src:
         path = Path(src)
+        if not path.is_file():
+            raise SystemExit(f"❌ no such file: {src}")
         side = path.with_name(path.name + ".sha256")
         want = sha or (side.read_text().split()[0] if side.exists() else None)
         if want and _sha256(path) != want:
             raise SystemExit("❌ sha256 mismatch for carried binary")
     else:
-        path = hub_bundle(str(FORGE / "bundle"), version)
+        path = hub_bundle(str(FORGE / "bundle"), version, flavor=flavor)
     BIN.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(path, BIN)
     BIN.chmod(0o755)
@@ -836,6 +848,8 @@ def hub_up() -> int:
     if pid := _running():
         print(f"🏠 already up pid={pid}")
         return pid
+    if os.geteuid() == 0:
+        print("⚠️  running as root: Forgejo / Gitea refuse to serve as root → run olnm as a normal user")
     LOG.mkdir(parents=True, exist_ok=True)
     p = subprocess.Popen([str(BIN), "--config", str(INI), "web"], stdout=(LOG / "web.out").open("a"), stderr=subprocess.STDOUT, start_new_session=True)
     PID.write_text(str(p.pid))
@@ -1038,7 +1052,13 @@ def hub_pr_new(title: str, head: str | None = None, base: str = "main", body: st
     p = Path(path).resolve()
     head = head or _sh("git", "branch", "--show-current", cwd=p)
     _sh("git", "push", "-q", "-u", "local", head, cwd=p)
-    pr = hub_api("POST", f"/repos/{_owner_repo(path)}/pulls", {"title": title, "head": head, "base": base, "body": body})
+    orp = _owner_repo(path)
+    for _ in range(30):  # the forge indexes pushed branches asynchronously
+        with contextlib.suppress(SystemExit):
+            hub_api("GET", f"/repos/{orp}/branches/{head}")
+            break
+        time.sleep(0.5)
+    pr = hub_api("POST", f"/repos/{orp}/pulls", {"title": title, "head": head, "base": base, "body": body})
     print(f"🔀 #{pr['number']} {pr['html_url']}")
     return pr
 
@@ -1056,7 +1076,7 @@ def hub_labels(path: str = ".") -> None:
 def hub_doctor() -> dict:
     """Binary, config, token, forge, git, gh, GitHub reachability."""
     st = _fstate()
-    checks = {"forgejo": BIN.exists(), "app.ini": INI.exists(), "token": bool(st.get("token")), "forge up": bool(_running()), "git": bool(shutil.which("git")), "gh": bool(shutil.which("gh"))}
+    checks = {"binary": BIN.exists(), "app.ini": INI.exists(), "token": bool(st.get("token")), "forge up": bool(_running()), "git": bool(shutil.which("git")), "gh": bool(shutil.which("gh"))}
     try:
         _fetch("https://api.github.com", timeout=5)
         checks["github 🌍"] = True
@@ -1134,8 +1154,8 @@ def build_parser() -> argparse.ArgumentParser:
     s = sp.add_parser("run", help="▶️ run one one-liner in bash"); s.add_argument("name"); s.add_argument("args", nargs=argparse.REMAINDER)
     s = sp.add_parser("call", help="🔌 call a function by name → JSON"); s.add_argument("fn"); s.add_argument("args", nargs="?", default="[]"); s.add_argument("--kwargs", default="{}")
     s = sp.add_parser("hub", help="🏠 local GitHub-like forge"); h = s.add_subparsers(dest="sub", required=True)
-    x = h.add_parser("install", help="📦 🌍 download or --from carried binary"); x.add_argument("--version", default="latest"); x.add_argument("--from", dest="src"); x.add_argument("--sha256", dest="sha")
-    x = h.add_parser("bundle", help="🎒 🌍 binary + .sha256 + olnm.py into DIR"); x.add_argument("dir"); x.add_argument("--version", default="latest")
+    x = h.add_parser("install", help="📦 🌍 download or --from carried binary"); x.add_argument("--version", default="latest"); x.add_argument("--from", dest="src"); x.add_argument("--sha256", dest="sha"); x.add_argument("--flavor", choices=sorted(FLAVORS), default="forgejo")
+    x = h.add_parser("bundle", help="🎒 🌍 binary + .sha256 + olnm.py into DIR"); x.add_argument("dir"); x.add_argument("--version", default="latest"); x.add_argument("--flavor", choices=sorted(FLAVORS), default="forgejo")
     x = h.add_parser("init", help="🏗️ config, db, admin, token"); x.add_argument("--port", type=int, default=3000); x.add_argument("--user", default="admin"); x.add_argument("--password")
     for name, hp in (("up", "🟢 start"), ("down", "🛑 stop"), ("status", "📊 status"), ("doctor", "🩺 checks"), ("sync", "🔄 push to all remotes"), ("labels", "🏷️ GitHub default labels")):
         h.add_parser(name, help=hp)
@@ -1155,8 +1175,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _hub_main(a: argparse.Namespace) -> None:
     match a.sub:
-        case "install": hub_install(a.version, a.src, a.sha)
-        case "bundle": hub_bundle(a.dir, a.version)
+        case "install": hub_install(a.version, a.src, a.sha, a.flavor)
+        case "bundle": hub_bundle(a.dir, a.version, flavor=a.flavor)
         case "init": hub_init(a.port, a.user, a.password)
         case "up": hub_up()
         case "down": hub_down()
