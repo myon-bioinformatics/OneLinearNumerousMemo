@@ -1,49 +1,69 @@
-# olnm.sh — OneLinearNumerousMemo  🧷 human-sized one-liners for bash/zsh
-# install: curl -fsSL <RAW_URL>/olnm.sh -o ~/.olnm.sh && echo 'source ~/.olnm.sh' >> ~/.bashrc
-# usage:   olnm            📖 list everything        olnm git   📖 one section
-#          olnm_doctor     🩺 which tools are missing
-# rule:    one line per function, `# <emoji> name: what it does` above it = the help text
-# target:  Ubuntu 26.04 with Python / Node(LTS) / uv present ; Bun, fzf, fd, rg, jq, gh, docker optional
-# marks:   🌍 in a description = needs internet (closed-network users: see `olnm_offline`, section airgap)
-# shellcheck shell=bash disable=SC2039,SC2068,SC2086,SC2120,SC2155,SC3043
+#!/usr/bin/env python3
+"""olnm 🧷 OneLinearNumerousMemo — one Python file that hands bash/zsh a few hundred human-sized one-liners.
 
-OLNM_FILE="${BASH_SOURCE[0]:-${(%):-%x}}"
-OLNM_URL="${OLNM_URL:-}"
+    curl -fsSL <RAW_URL>/olnm.py -o ~/.olnm.py && echo 'eval "$(python3 ~/.olnm.py init)"' >> ~/.bashrc   # or ~/.zshrc
 
-# ───────────────────────── 📖 meta ─────────────────────────
-# 📖 olnm: list one-liners (optionally one section: olnm git)
-olnm() { awk -v s="${1:-}" '/^# ─/{sec=$4; next} /^# [^ ]+ [a-zA-Z_0-9]+: /{ if (s==""||sec==s) {e=$2; n=$3; sub(/^# [^ ]+ [a-zA-Z_0-9]+: /,""); printf "%-8s %s %-12s %s\n",sec,e,n,$0} }' "$OLNM_FILE"; }
-# 🔎 olnm_grep: search help text by keyword
-olnm_grep() { olnm | grep -i -- "$*"; }
-# 🗂️ olnm_sections: list section names
-olnm_sections() { awk '/^# ─/{print $3, $4}' "$OLNM_FILE"; }
-# 🔒 olnm_offline: list only one-liners that work without internet (no globe mark)
-olnm_offline() { olnm "$@" | grep -v 🌍; }
-# 🩺 olnm_doctor: show which optional tools are present/missing
-olnm_doctor() { for t in uv python3 node npm npx bun git gh fzf fd rg jq curl docker tmux column; do command -v "$t" >/dev/null && printf '✅ %s\n' "$t" || printf '❌ %s\n' "$t"; done; }
-# ⬇️ olnm_update: 🌍 re-download this file from $OLNM_URL and reload
-olnm_update() { [ -n "$OLNM_URL" ] && curl -fsSL "$OLNM_URL" -o "$OLNM_FILE" && . "$OLNM_FILE" && echo "🔄 reloaded $OLNM_FILE" || echo "set OLNM_URL first"; }
-# 🔄 olnm_reload: re-source this file
-olnm_reload() { . "$OLNM_FILE" && echo "🔄 $OLNM_FILE"; }
-# 📝 olnm_edit: open this file in $EDITOR
-olnm_edit() { "${EDITOR:-vi}" "$OLNM_FILE"; }
-# 🔢 olnm_steps: count non-blank lines of this file (<1000 budget)
-olnm_steps() { grep -cve '^\s*$' "$OLNM_FILE"; }
-# 🏷️ olnm_names: all function names defined here (for completion / typo hints)
-olnm_names() { grep -oE '^[a-zA-Z_0-9]+\(\)' "$OLNM_FILE" | tr -d '()'; }
+    olnm            📖 list            olnm git        📖 one section
+    olnm_like uvtets 🤔 closest names  olnm_dial 0..3  🎛️ shared dial with hubdial ($DIAL_FILE)
+
+Rules: one function per line in SHELL below, `# <emoji> name: what it does` right above it = the help text.
+       🌍 in a description = needs internet (stubbed at dial 0/1).  🎛️ = routed to hubdial at dial ≤2.
+Target: Ubuntu 26.04 with Python / Node(LTS) / uv. Bun, fzf, fd, rg, jq, gh, docker optional.
+
+Callable by name from Python (`import olnm; olnm.like("uvtets")`), shell (`python3 olnm.py call like '["uvtets"]'`)
+and Node / Bun (`execFileSync("python3", ["olnm.py", "run", "pycalc", "2**10"])`).
+"""
+from __future__ import annotations
+
+import argparse
+import difflib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+PY = Path(__file__).resolve()
+DIAL_FILE = Path(os.environ.get("DIAL_FILE", Path.home() / ".config" / "dial"))
+DIALS = {0: "🔌 offline", 1: "🏠 local", 2: "🔁 mirror", 3: "☁️ github"}
+TOOLS = ("python3", "uv", "node", "npm", "npx", "bun", "git", "gh", "hubdial", "fzf", "fd", "rg", "jq", "curl", "docker", "tmux", "entr", "tree")
+HELP = re.compile(r"^# (\S+) ([A-Za-z_0-9]+): (.*)$")
+SECTION = re.compile(r"^# ─+ (\S+) (\S+) ─+$")
+
+# ───────────────────────── 📖 meta (shell shims → this file) ─────────────────────────
+META = r"""
+# 📖 olnm: list one-liners (olnm git = one section)
+olnm() { python3 "$OLNM_PY" ls "$@"; }
+# 🔎 olnm_grep: search help text (olnm_grep json)
+olnm_grep() { python3 "$OLNM_PY" grep "$@"; }
 # 🤔 olnm_like: closest names to a typo or fragment (olnm_like uvtets)
-olnm_like() { { olnm_names | grep -i -- "$1"; python3 -c 'import difflib,sys;print("\n".join(difflib.get_close_matches(sys.argv[1],sys.argv[2:],6,0.5)))' "$1" $(olnm_names); } | awk '!x[$0]++' | head -8; }
-# 🧭 _olnm_cnf: command-not-found hook → shows "did you mean" from olnm names, then falls through
-_olnm_cnf() { local c; c="$(olnm_like "$1")"; [ -n "$c" ] && printf '🤔 %s → did you mean: %s\n' "$1" "$(echo "$c" | tr '\n' ' ')" >&2; type _olnm_cnf_prev >/dev/null 2>&1 && _olnm_cnf_prev "$@"; return 127; }
-if [ -n "$BASH_VERSION" ]; then
-  declare -F command_not_found_handle >/dev/null && ! declare -F _olnm_cnf_prev >/dev/null && eval "$(declare -f command_not_found_handle | sed '1s/.*/_olnm_cnf_prev ()/')"
-  command_not_found_handle() { _olnm_cnf "$@"; }
-  complete -W "$(awk '/^# ─/{print $4}' "$OLNM_FILE")" olnm olnm_offline
-elif [ -n "$ZSH_VERSION" ]; then
-  command_not_found_handler() { _olnm_cnf "$@"; }
-  compdef "_arguments \"1:section:($(awk '/^# ─/{print $4}' "$OLNM_FILE" | tr '\n' ' '))\"" olnm olnm_offline 2>/dev/null
-fi
+olnm_like() { python3 "$OLNM_PY" like "$@"; }
+# 🗂️ olnm_sections: section names
+olnm_sections() { python3 "$OLNM_PY" sections; }
+# 🔒 olnm_offline: only one-liners that work without internet
+olnm_offline() { python3 "$OLNM_PY" ls --offline "$@"; }
+# 🌍 olnm_net: names that need internet
+olnm_net() { python3 "$OLNM_PY" net; }
+# 🎛️ olnm_dial: show / set shared dial 0🔌 1🏠 2🔁 3☁️ (also drives hubdial)
+olnm_dial() { python3 "$OLNM_PY" dial "$@" && olnm_reload >/dev/null; }
+# 🩺 olnm_doctor: which tools are present
+olnm_doctor() { python3 "$OLNM_PY" doctor; }
+# 🔄 olnm_reload: re-evaluate after edits or dial change
+olnm_reload() { eval "$(python3 "$OLNM_PY" init)" && echo "🔄 $OLNM_PY"; }
+# 📝 olnm_edit: open olnm.py in $EDITOR
+olnm_edit() { "${EDITOR:-vi}" "$OLNM_PY" && olnm_reload; }
+# ⬇️ olnm_update: 🌍 re-download olnm.py from $OLNM_URL and reload
+olnm_update() { [ -n "$OLNM_URL" ] || { echo "set OLNM_URL"; return 1; }; curl -fsSL "$OLNM_URL" -o "$OLNM_PY.new" && python3 "$OLNM_PY.new" ls >/dev/null && mv "$OLNM_PY.new" "$OLNM_PY" && olnm_reload; }
+# 🔢 olnm_steps: non-blank lines of olnm.py
+olnm_steps() { grep -cve '^\s*$' "$OLNM_PY"; }
+_olnm_d() { cat "$DIAL_FILE" 2>/dev/null || echo 3; }
+_olnm_hub() { [ "$(_olnm_d)" -le 2 ] && command -v hubdial >/dev/null; }
+_olnm_cnf() { python3 "$OLNM_PY" like "$1" --hint >&2; return 127; }
+"""
 
+SHELL = r"""
 # ───────────────────────── 🐍 uv ─────────────────────────
 # 🧪 uvtest: run unittest discover (locked env)
 uvtest() { uv run --locked python -m unittest discover "$@"; }
@@ -165,11 +185,11 @@ ga() { git add -A "$@"; }
 gc() { git commit -m "$*"; }
 # 💬 gca: amend without editing message
 gca() { git commit --amend --no-edit; }
-# 🚀 gp: 🌍 push current branch, set upstream if needed
+# 🚀 gp: push current branch to origin (dial decides where), set upstream
 gp() { git push -u origin "$(git branch --show-current)" "$@"; }
-# 🚀 gpf: 🌍 force-push safely (with-lease)
+# 🚀 gpf: force-push to origin safely (with-lease)
 gpf() { git push --force-with-lease "$@"; }
-# ⬇️ gpl: 🌍 pull with rebase + autostash
+# ⬇️ gpl: pull from origin with rebase + autostash
 gpl() { git pull --rebase --autostash "$@"; }
 # 🌱 gcb: create and switch to branch (gcb feat/x)
 gcb() { git switch -c "$1"; }
@@ -183,7 +203,7 @@ gwip() { git add -A && git commit -m "wip: $(date +%F_%T)"; }
 gundo() { git reset --soft HEAD~1; }
 # 🧹 gclean: delete local branches already merged into main/master
 gclean() { git branch --merged | grep -vE '^\*|main|master' | xargs -r git branch -d; }
-# 🧹 gprune: 🌍 fetch + prune + gc
+# 🧹 gprune: fetch origin + prune + gc
 gprune() { git fetch -p && git gc --auto; }
 # 🔍 gdiff: diff of staged changes (gdiff) or working (gdiffw)
 gdiff() { git diff --cached "$@"; }
@@ -209,20 +229,20 @@ gsearch() { git log --oneline --all -i --grep="$*"; }
 gchanged() { git diff --name-only "HEAD~${1:-1}" HEAD; }
 
 # ───────────────────────── 🐙 gh ─────────────────────────
-# 🐙 ghpr: 🌍 create PR with title (ghpr "title") or interactive
-ghpr() { [ -n "$1" ] && gh pr create --fill --title "$*" || gh pr create --fill; }
-# 📋 ghprs: 🌍 list open PRs
-ghprs() { gh pr list "$@"; }
+# 🐙 ghpr: 🎛️ create PR (hubdial at dial ≤2, gh at 3) (ghpr "title")
+ghpr() { _olnm_hub && { hubdial pr new "${*:-$(git log -1 --format=%s)}"; return; }; [ -n "$1" ] && gh pr create --fill --title "$*" || gh pr create --fill; }
+# 📋 ghprs: 🎛️ list open PRs (hubdial at dial ≤2)
+ghprs() { _olnm_hub && { hubdial pr ls; return; }; gh pr list "$@"; }
 # 👀 ghprv: 🌍 view current PR in browser
 ghprv() { gh pr view --web "$@"; }
 # ✅ ghprm: 🌍 squash-merge PR and delete branch (ghprm [num])
 ghprm() { gh pr merge "$@" --squash --delete-branch; }
 # 🔀 ghco: 🌍 checkout PR by number (ghco 42)
 ghco() { gh pr checkout "$1"; }
-# 🐛 ghis: 🌍 list open issues
-ghis() { gh issue list "$@"; }
-# 🐛 ghisn: 🌍 new issue (ghisn "title" [label])
-ghisn() { gh issue create --title "$1" --body "" ${2:+--label "$2"}; }
+# 🐛 ghis: 🎛️ list open issues (hubdial at dial ≤2)
+ghis() { _olnm_hub && { hubdial issue ls; return; }; gh issue list "$@"; }
+# 🐛 ghisn: 🎛️ new issue (ghisn "title" [label]) (hubdial at dial ≤2)
+ghisn() { _olnm_hub && { hubdial issue new "$1" ${2:+--label "$2"}; return; }; gh issue create --title "$1" --body "" ${2:+--label "$2"}; }
 # 🌐 ghweb: 🌍 open repo in browser
 ghweb() { gh repo view --web; }
 # 🏃 ghruns: 🌍 recent workflow runs
@@ -396,7 +416,7 @@ envg() { env | grep -i -- "$1" | sort; }
 # 📜 h: grep shell history (h git)
 h() { history | grep -i -- "$*" | tail -"${N:-30}"; }
 # 🔁 rl: reload shell rc
-rl() { [ -n "$ZSH_VERSION" ] && . ~/.zshrc || . ~/.bashrc; }
+rl() { if [ -n "$ZSH_VERSION" ]; then . ~/.zshrc; else . ~/.bashrc; fi; }
 # ⏱️ tm: time a command with wall clock (tm sleep 1)
 tm() { local s=$SECONDS; "$@"; echo "⏱️ $((SECONDS-s))s"; }
 # 🔁 rep: repeat command n times (rep 3 echo hi)
@@ -411,7 +431,7 @@ sysinfo() { . /etc/os-release 2>/dev/null; echo "🖥️ ${PRETTY_NAME:-?} | $(u
 ver() { for t in python3 uv node npm bun git gh; do command -v "$t" >/dev/null && printf '%-8s %s\n' "$t" "$("$t" --version 2>&1 | head -1)"; done; }
 # 🧹 cleanup: clear apt/npm/uv/pip caches
 cleanup() { sudo apt clean; npm cache clean --force 2>/dev/null; uv cache clean 2>/dev/null; pip cache purge 2>/dev/null; echo "🧹 done"; }
-# 📋 alias1: define alias that persists in this file section (prints line to add)
+# 📋 alias1: print a help line + function to paste into olnm.py (alias1 ll "ls -la")
 alias1() { printf '# ⭐ %s: %s\n%s() { %s "$@"; }\n' "$1" "$2" "$1" "$2"; }
 
 # ───────────────────────── 🔒 airgap ─────────────────────────
@@ -461,8 +481,6 @@ envreport() { { echo "# $(date -Iseconds) $(hostname)"; sysinfo; ver; for f in u
 licenses() { python3 -c 'import importlib.metadata as m;[print(f"{d.metadata["Name"]:30} {d.version:12} {(d.metadata.get("License-Expression") or d.metadata.get("License") or "?")[:40]}") for d in sorted(m.distributions(),key=lambda d:d.metadata["Name"].lower())]'; }
 # 📋 pyfreeze: pip freeze of current interpreter (uv env if present)
 pyfreeze() { uv pip freeze 2>/dev/null || python3 -m pip freeze; }
-# 🔍 whatnet: list functions in this file that need internet (globe mark)
-whatnet() { olnm | grep 🌍 | awk '{sub(/:$/,"",$3);print $3}' | tr '\n' ' '; echo; }
 
 # ───────────────────────── 🐳 docker ─────────────────────────
 # 🐳 dps: running containers, compact
@@ -507,3 +525,185 @@ todo() { [ -n "$1" ] && printf -- '- [ ] %s\n' "$*" >> ~/todo.md || grep -n '\[ 
 done1() { sed -i "${1}s/\[ \]/[x]/" ~/todo.md && grep -n '\[x\]' ~/todo.md | tail -1; }
 # 📓 jnl: open today's journal ~/journal/YYYY-MM-DD.md
 jnl() { mkdir -p ~/journal && "${EDITOR:-vi}" ~/journal/"$(date +%F)".md; }
+"""
+
+
+# ───────────────────────── 🧰 parsing ─────────────────────────
+def entries() -> list[dict]:
+    """Every help line: section, emoji, name, description, needs-internet flag."""
+    out, sec = [], "meta"
+    for line in (META + SHELL).splitlines():
+        if m := SECTION.match(line):
+            sec = m.group(2)
+        elif m := HELP.match(line):
+            out.append({"section": sec, "emoji": m.group(1), "name": m.group(2), "desc": m.group(3), "net": "🌍" in m.group(3) and "🎛️" not in m.group(3)})
+    return out
+
+
+def names() -> list[str]:
+    """All function names (help lines only, private helpers excluded)."""
+    return [e["name"] for e in entries()]
+
+
+def sections() -> list[str]:
+    """Section names in file order."""
+    seen = _sections()
+    print(" ".join(seen))
+    return seen
+
+
+def net() -> list[str]:
+    """Names that need internet (🌍)."""
+    out = [e["name"] for e in entries() if e["net"]]
+    print(" ".join(out))
+    return out
+
+
+# ───────────────────────── 📖 listing ─────────────────────────
+def ls(section: str | None = None, offline: bool = False) -> list[dict]:
+    """Print help lines, optionally one section and/or offline-only."""
+    rows = [e for e in entries() if (not section or e["section"] == section) and not (offline and e["net"])]
+    if section and not rows:
+        print(f"🤔 no section {section!r} → {' '.join(_sections())}")
+    for e in rows:
+        print(f"{e['section']:<8} {e['emoji']} {e['name']:<14} {e['desc']}")
+    return rows
+
+
+def _sections() -> list[str]:
+    return ["meta"] + [m.group(2) for m in map(SECTION.match, SHELL.splitlines()) if m]
+
+
+def grep(*words: str) -> list[dict]:
+    """Search names and descriptions (all words must match, case-insensitive)."""
+    ws = [w.lower() for w in words]
+    rows = [e for e in entries() if all(w in f"{e['name']} {e['desc']}".lower() for w in ws)]
+    for e in rows:
+        print(f"{e['section']:<8} {e['emoji']} {e['name']:<14} {e['desc']}")
+    return rows
+
+
+def like(word: str, hint: bool = False, n: int = 6) -> list[str]:
+    """Closest names: substring hits first, then difflib similarity ≥0.5."""
+    pool = names()
+    hits = [x for x in pool if word.lower() in x.lower() and x != word]
+    hits += [x for x in difflib.get_close_matches(word, pool, n, 0.5) if x not in hits]
+    hits = hits[:n]
+    if hint:
+        if hits:
+            print(f"🤔 {word} → did you mean: {' '.join(hits)}")
+        else:
+            print(f"❓ {word}: command not found")
+    else:
+        print("\n".join(hits))
+    return hits
+
+
+# ───────────────────────── 🎛️ dial ─────────────────────────
+def read_dial(default: int = 3) -> int:
+    try:
+        return int(DIAL_FILE.read_text().strip())
+    except (OSError, ValueError):
+        return default
+
+
+def dial(level: int | None = None) -> int:
+    """Show or set the shared dial. Also tells hubdial (if installed) so remotes follow."""
+    if level is None:
+        lv = read_dial()
+        print(f"🎛️  {lv} {DIALS[lv]}  ({DIAL_FILE})")
+        return lv
+    if level not in DIALS:
+        raise SystemExit("❌ dial must be 0..3")
+    DIAL_FILE.parent.mkdir(parents=True, exist_ok=True)
+    DIAL_FILE.write_text(f"{level}\n")
+    if shutil.which("hubdial"):
+        subprocess.run(["hubdial", "dial", str(level)], check=False)
+    print(f"🎛️  → {level} {DIALS[level]}" + ("  🌍 one-liners stubbed" if level <= 1 else ""))
+    return level
+
+
+# ───────────────────────── 🐚 shell ─────────────────────────
+def init(shell: str | None = None) -> str:
+    """Shell code to eval: functions + dial stubs + typo hook + completion."""
+    shell = shell or ("zsh" if "zsh" in os.environ.get("SHELL", "") else "bash")
+    parts = [f'OLNM_PY="{PY}"', f'DIAL_FILE="${{DIAL_FILE:-{DIAL_FILE}}}"', META, SHELL]
+    if read_dial() <= 1:
+        for e in entries():
+            if e["net"]:
+                parts.append(f'{e["name"]}() {{ echo "🔌 {e["name"]}: 🌍 needs dial ≥2 (now $(_olnm_d)) → olnm_dial 2" >&2; return 1; }}')
+    secs = " ".join(_sections())
+    if shell == "zsh":
+        parts.append("command_not_found_handler() { _olnm_cnf \"$@\"; }")
+        parts.append(f'(( $+functions[compdef] )) && compdef "_arguments \\"1:section:({secs})\\"" olnm olnm_offline')
+    else:
+        parts.append("command_not_found_handle() { _olnm_cnf \"$@\"; }")
+        parts.append(f'complete -W "{secs}" olnm olnm_offline')
+        parts.append('complete -W "0 1 2 3" olnm_dial')
+    code = "\n".join(parts) + "\n"
+    print(code, end="")
+    return code
+
+
+def run(name: str, *args: str) -> int:
+    """Run one one-liner in a non-interactive bash (for Node / Bun / Python callers)."""
+    if name not in names():
+        like(name, hint=True)
+        return 127
+    script = f'eval "$(python3 "{PY}" init bash)"; {name} "$@"'
+    return subprocess.run(["bash", "-c", script, name, *args]).returncode
+
+
+def doctor() -> dict:
+    """Which optional tools are on PATH, and the current dial."""
+    res = {t: bool(shutil.which(t)) for t in TOOLS}
+    print(" ".join(("✅ " if v else "❌ ") + k for k, v in res.items()))
+    dial()
+    return res
+
+
+def call(fn: str, args: list | None = None, kwargs: dict | None = None):
+    """Call a public function by name; result printed as JSON by the CLI."""
+    f = globals().get(fn)
+    if fn.startswith("_") or not callable(f) or fn in {"main", "call", "build_parser"}:
+        raise SystemExit(f"❌ no function {fn!r}")
+    return f(*(args or []), **(kwargs or {}))
+
+
+# ───────────────────────── 🧭 cli ─────────────────────────
+def build_parser() -> argparse.ArgumentParser:
+    ap = argparse.ArgumentParser(prog="olnm", description="🧷 OneLinearNumerousMemo")
+    sp = ap.add_subparsers(dest="cmd", required=True)
+    s = sp.add_parser("init", help="🐚 print shell code to eval"); s.add_argument("shell", nargs="?", choices=["bash", "zsh"])
+    s = sp.add_parser("ls", help="📖 list"); s.add_argument("section", nargs="?"); s.add_argument("--offline", action="store_true")
+    s = sp.add_parser("grep", help="🔎 search"); s.add_argument("words", nargs="+")
+    s = sp.add_parser("like", help="🤔 closest names"); s.add_argument("word"); s.add_argument("--hint", action="store_true")
+    sp.add_parser("sections", help="🗂️ sections"); sp.add_parser("net", help="🌍 internet-needing names"); sp.add_parser("doctor", help="🩺 tools")
+    s = sp.add_parser("dial", help="🎛️ show/set dial"); s.add_argument("level", nargs="?", type=int, choices=sorted(DIALS))
+    s = sp.add_parser("run", help="▶️ run one one-liner in bash"); s.add_argument("name"); s.add_argument("args", nargs=argparse.REMAINDER)
+    s = sp.add_parser("call", help="🔌 call a function by name → JSON"); s.add_argument("fn"); s.add_argument("args", nargs="?", default="[]"); s.add_argument("--kwargs", default="{}")
+    return ap
+
+
+def main(argv: list[str] | None = None) -> int:
+    a = build_parser().parse_args(argv)
+    match a.cmd:
+        case "init": init(a.shell)
+        case "ls": ls(a.section, a.offline)
+        case "grep": grep(*a.words)
+        case "like": return 0 if like(a.word, a.hint) or not a.hint else 127
+        case "sections": sections()
+        case "net": net()
+        case "doctor": doctor()
+        case "dial": dial(a.level)
+        case "run": return run(a.name, *a.args)
+        case "call":
+            import contextlib, io
+            with contextlib.redirect_stdout(io.StringIO()):
+                out = call(a.fn, json.loads(a.args), json.loads(a.kwargs))
+            print(json.dumps(out, ensure_ascii=False, default=str))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
