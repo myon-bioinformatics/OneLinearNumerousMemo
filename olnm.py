@@ -484,7 +484,7 @@ proxyon() { [ -n "$CORP_PROXY" ] || { echo "set CORP_PROXY=http://host:port"; re
 # 🛰️ proxyoff: unset proxy vars
 proxyoff() { unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY all_proxy ALL_PROXY; echo "🛰️ off"; }
 # 🏛️ cabundle: point python/node/curl/git/uv at a corporate CA bundle (cabundle /path/ca.pem)
-cabundle() { [ -f "$1" ] || { echo "file?"; return 1; }; export SSL_CERT_FILE="$1" REQUESTS_CA_BUNDLE="$1" CURL_CA_BUNDLE="$1" NODE_EXTRA_CA_CERTS="$1" GIT_SSL_CAINFO="$1" UV_NATIVE_TLS=1; echo "🏛️ $1"; }
+cabundle() { [ -f "$1" ] || { echo "file?"; return 1; }; export SSL_CERT_FILE="$1" REQUESTS_CA_BUNDLE="$1" CURL_CA_BUNDLE="$1" NODE_EXTRA_CA_CERTS="$1" GIT_SSL_CAINFO="$1" UV_SYSTEM_CERTS=1; unset UV_NATIVE_TLS; echo "🏛️ $1"; }
 # 🧾 envreport: snapshot of toolchain + lock hashes → env-report.txt (evidence for reviews)
 envreport() { { echo "# $(date -Iseconds) $(hostname)"; sysinfo; ver; for f in uv.lock package-lock.json bun.lock requirements.txt; do [ -f "$f" ] && sha256sum "$f"; done; } | tee env-report.txt; }
 # 🧾 licenses: list licenses of installed python packages (stdlib metadata only)
