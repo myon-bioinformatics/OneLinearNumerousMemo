@@ -146,6 +146,19 @@ class TestHubInit(HubBase):
                 olnm.hub_bundle(str(TMP / "carry2"), version="1.2.3")
 
 
+    def test_latest_falls_back_to_verified(self):
+        def blocked(*a, **k):
+            raise olnm.urllib.error.URLError("blocked")
+        with mock.patch.object(olnm, "_fetch", blocked), mock.patch.object(olnm, "_open", blocked):
+            self.assertEqual(olnm._latest_version("gitea"), olnm.VERIFIED["gitea"])
+            with self.assertRaises(SystemExit):
+                olnm._latest_version("forgejo")
+
+    def test_ini_pins_public_url(self):
+        olnm.hub_init(port=PORT, password="pw")
+        self.assertIn("PUBLIC_URL_DETECTION = legacy", olnm.INI.read_text())
+
+
 class TestHub(HubBase):
     def setUp(self):
         super().setUp(); olnm.hub_init(port=PORT, password="pw"); olnm.hub_up()

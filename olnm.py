@@ -5,7 +5,7 @@
 
     olnm            📖 list            olnm git        📖 one section
     olnm_like uvtets 🤔 closest names  olnm_dial 0..3  🎛️ 0🔌 offline · 1🏠 local · 2🔁 mirror · 3☁️ github
-    hubdial install / init / up      🏠 local forge (Forgejo) · hubadd · ghpr/ghis go there at dial ≤2
+    hubdial install / init / up      🏠 local forge (Gitea / Forgejo) · hubadd · ghpr/ghis go there at dial ≤2
 
 Rules: one function per line in SHELL below, `# <emoji> name: what it does` right above it = the help text.
        🌍 in a description = needs internet (stubbed at dial 0/1).  🎛️ = routed to hubdial at dial ≤2.
@@ -645,17 +645,18 @@ def dial(level: int | None = None) -> int:
     return level
 
 
-# ───────────────────────── 🏠 hub: local GitHub-like forge (Forgejo) ─────────────────────────
+# ───────────────────────── 🏠 hub: local GitHub-like forge (Gitea / Forgejo) ─────────────────────────
 FORGE = OLNM_HOME / "forge"
 BIN, DATA, BARE, LOG = FORGE / "bin" / "forge", FORGE / "data", FORGE / "bare", FORGE / "log"
-INI, PID, FSTATE = FORGE / "app.ini", FORGE / "forgejo.pid", FORGE / "state.json"
-# 🧬 flavors: Forgejo (default, Codeberg) or Gitea (same CLI + API, released on GitHub — often reachable where Codeberg is not)
+INI, PID, FSTATE = FORGE / "app.ini", FORGE / "forge.pid", FORGE / "state.json"
+# 🧬 flavors: Gitea (default: since 2016, MIT, released on GitHub) or Forgejo (its 2022 fork, GPLv3+, released on Codeberg). Same CLI + API.
 FLAVORS = {
     "forgejo": {"urls": ("https://codeberg.org/forgejo/forgejo/releases/download/v{v}/forgejo-{v}-linux-{arch}", "https://code.forgejo.org/forgejo/forgejo/releases/download/v{v}/forgejo-{v}-linux-{arch}"),
                 "latest": ("https://codeberg.org/api/v1/repos/forgejo/forgejo/releases/latest", "https://code.forgejo.org/api/v1/repos/forgejo/forgejo/releases/latest")},
     "gitea": {"urls": ("https://github.com/go-gitea/gitea/releases/download/v{v}/gitea-{v}-linux-{arch}", "https://dl.gitea.com/gitea/{v}/gitea-{v}-linux-{arch}"),
               "latest": ("https://api.github.com/repos/go-gitea/gitea/releases/latest", "https://github.com/go-gitea/gitea/releases/latest")},
 }
+VERIFIED = {"gitea": "1.27.3"}  # ✅ end-to-end checked with olnm; used when the "latest" lookup is blocked but downloads are not
 GH_LABELS = {"bug": "d73a4a", "enhancement": "a2eeef", "documentation": "0075ca", "question": "d876e3", "help wanted": "008672", "good first issue": "7057ff", "wontfix": "ffffff", "duplicate": "cfd3d7"}
 APP_INI = """\
 APP_NAME = olnm hub
@@ -666,6 +667,7 @@ PROTOCOL = http
 HTTP_ADDR = 127.0.0.1
 HTTP_PORT = {port}
 ROOT_URL = http://localhost:{port}/
+PUBLIC_URL_DETECTION = legacy
 DISABLE_SSH = true
 OFFLINE_MODE = true
 [database]
@@ -756,7 +758,7 @@ def hub_port() -> int:
     return _fstate()["port"]
 
 
-def _latest_version(flavor: str = "forgejo") -> str:
+def _latest_version(flavor: str = "gitea") -> str:
     for url in FLAVORS[flavor]["latest"]:
         try:
             if url.startswith("https://github.com/"):  # release page redirects to /tag/vX.Y.Z
@@ -765,11 +767,14 @@ def _latest_version(flavor: str = "forgejo") -> str:
             return json.loads(_fetch(url, timeout=20))["tag_name"].lstrip("v")
         except (urllib.error.URLError, KeyError, IndexError, json.JSONDecodeError, TimeoutError):
             continue
+    if v := VERIFIED.get(flavor):
+        print(f"↪️  latest {flavor} unknown (lookup blocked) → verified {v}")
+        return v
     other = "gitea" if flavor == "forgejo" else "forgejo"
     raise SystemExit(f"❌ cannot reach {flavor} releases → try --flavor {other}, or install --from FILE")
 
 
-def hub_bundle(dest: str = "carry", version: str = "latest", arch: str = "amd64", flavor: str = "forgejo") -> Path:
+def hub_bundle(dest: str = "carry", version: str = "latest", arch: str = "amd64", flavor: str = "gitea") -> Path:
     """🌍 Download the forge binary + .sha256 into DEST and copy olnm.py beside it — carry DEST into a closed network."""
     if flavor not in FLAVORS:
         raise SystemExit(f"❌ flavor must be one of {', '.join(FLAVORS)}")
@@ -794,7 +799,7 @@ def hub_bundle(dest: str = "carry", version: str = "latest", arch: str = "amd64"
     return out / name
 
 
-def hub_install(version: str = "latest", src: str | None = None, sha: str | None = None, flavor: str = "forgejo") -> Path:
+def hub_install(version: str = "latest", src: str | None = None, sha: str | None = None, flavor: str = "gitea") -> Path:
     """Place the forge binary at ~/.olnm/forge/bin/forge. Online: download+verify. Offline: --from carried file (checked against sha or sidecar .sha256)."""
     if src:
         path = Path(src)
@@ -849,7 +854,7 @@ def hub_up() -> int:
         print(f"🏠 already up pid={pid}")
         return pid
     if os.geteuid() == 0:
-        print("⚠️  running as root: Forgejo / Gitea refuse to serve as root → run olnm as a normal user")
+        print("⚠️  running as root: Gitea / Forgejo refuse to serve as root → run olnm as a normal user")
     LOG.mkdir(parents=True, exist_ok=True)
     p = subprocess.Popen([str(BIN), "--config", str(INI), "web"], stdout=(LOG / "web.out").open("a"), stderr=subprocess.STDOUT, start_new_session=True)
     PID.write_text(str(p.pid))
@@ -889,7 +894,7 @@ def hub_logs(n: int = 40) -> str:
 
 
 def hub_api(method: str, path: str, data: dict | None = None, token: str | None = None, base: str | None = None):
-    """Forgejo REST (GitHub-shaped): hub_api('GET', '/user/repos')."""
+    """Gitea / Forgejo REST v1 (GitHub-shaped): hub_api('GET', '/user/repos')."""
     st = _fstate()
     url = (base or f"http://127.0.0.1:{st['port']}/api/v1") + path
     body = json.dumps(data).encode() if data is not None else None
@@ -1154,8 +1159,8 @@ def build_parser() -> argparse.ArgumentParser:
     s = sp.add_parser("run", help="▶️ run one one-liner in bash"); s.add_argument("name"); s.add_argument("args", nargs=argparse.REMAINDER)
     s = sp.add_parser("call", help="🔌 call a function by name → JSON"); s.add_argument("fn"); s.add_argument("args", nargs="?", default="[]"); s.add_argument("--kwargs", default="{}")
     s = sp.add_parser("hub", help="🏠 local GitHub-like forge"); h = s.add_subparsers(dest="sub", required=True)
-    x = h.add_parser("install", help="📦 🌍 download or --from carried binary"); x.add_argument("--version", default="latest"); x.add_argument("--from", dest="src"); x.add_argument("--sha256", dest="sha"); x.add_argument("--flavor", choices=sorted(FLAVORS), default="forgejo")
-    x = h.add_parser("bundle", help="🎒 🌍 binary + .sha256 + olnm.py into DIR"); x.add_argument("dir"); x.add_argument("--version", default="latest"); x.add_argument("--flavor", choices=sorted(FLAVORS), default="forgejo")
+    x = h.add_parser("install", help="📦 🌍 download or --from carried binary"); x.add_argument("--version", default="latest"); x.add_argument("--from", dest="src"); x.add_argument("--sha256", dest="sha"); x.add_argument("--flavor", choices=sorted(FLAVORS), default="gitea")
+    x = h.add_parser("bundle", help="🎒 🌍 binary + .sha256 + olnm.py into DIR"); x.add_argument("dir"); x.add_argument("--version", default="latest"); x.add_argument("--flavor", choices=sorted(FLAVORS), default="gitea")
     x = h.add_parser("init", help="🏗️ config, db, admin, token"); x.add_argument("--port", type=int, default=3000); x.add_argument("--user", default="admin"); x.add_argument("--password")
     for name, hp in (("up", "🟢 start"), ("down", "🛑 stop"), ("status", "📊 status"), ("doctor", "🩺 checks"), ("sync", "🔄 push to all remotes"), ("labels", "🏷️ GitHub default labels")):
         h.add_parser(name, help=hp)

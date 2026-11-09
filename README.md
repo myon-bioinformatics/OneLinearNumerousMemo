@@ -1,6 +1,6 @@
 # 🧷 OneLinearNumerousMemo (olnm)
 
-bash/zsh 用ワンライナー集 + ローカル GitHub（Forgejo）。**Python 1 ファイル**（`olnm.py`、標準ライブラリのみ）が中にシェル関数を持ち、`eval` で読み込む形。
+bash/zsh 用ワンライナー集 + ローカル GitHub（Gitea / Forgejo）。**Python 1 ファイル**（`olnm.py`、標準ライブラリのみ）が中にシェル関数を持ち、`eval` で読み込む形。
 想定: Ubuntu 26.04、Python / Node(LTS) / uv はある前提（Bun・fzf・fd・rg・jq・gh・docker は任意）。
 
 ## 導入
@@ -30,7 +30,7 @@ curl -fsSL <RAW_URL>/olnm.py -o ~/.olnm.py && echo 'eval "$(python3 ~/.olnm.py i
 | 3 ☁️ github | 動く | gh へ | GitHub | 起動（バックアップ） |
 
 ## 🏠 hub（ローカル GitHub）
-中身は [Forgejo](https://forgejo.org)（単一バイナリ、Issue・PR・Actions 互換 CI）。設定は sqlite・127.0.0.1 のみ・SSH/メール/新規登録なし。
+中身は [Gitea](https://about.gitea.com)（既定）か [Forgejo](https://forgejo.org)。どちらも単一バイナリで Issue・PR・Actions 互換 CI。設定は sqlite・127.0.0.1 のみ・SSH/メール/新規登録なし。
 ```sh
 hubdial install        # 🌍 バイナリ取得 + sha256 照合（→ ~/.olnm/forge/bin）
 hubdial init           # 🏗️ admin・API トークン作成、git 認証を ~/.gitconfig へ、ダイヤルを 1 に
@@ -40,12 +40,15 @@ ghisn "crash" bug ; ghis ; ghpr "fix"     # 🐛🔀 ダイヤル ≤2 ならロ
 olnm_dial 2            # 🔁 GitHub へ push mirror（GITHUB_TOKEN か gh auth が必要）
 hubsync                # 🔄 bare / local /（≥2 なら）github へまとめて push
 ```
-閉域網へ持ち込み: オンライン側で `hubdial bundle ./carry`（バイナリ + .sha256 + olnm.py）→ 閉域側で `python3 carry/olnm.py hub install --from carry/forgejo-*-linux-amd64`。
+閉域網へ持ち込み: オンライン側で `hubdial bundle ./carry`（バイナリ + .sha256 + olnm.py）→ 閉域側で `python3 carry/olnm.py hub install --from carry/gitea-*-linux-amd64`。
 
-- 🧬 `--flavor gitea`（install / bundle）: Codeberg が塞がれていて GitHub は通る環境向け。Gitea は Forgejo の元で、CLI も API も同じ形なので olnm からの使い方は変わらない
-- 👤 forge は root では起動しない（Forgejo / Gitea の仕様）。普通のユーザーで使う
+- 🧬 `--flavor`（install / bundle）: 既定 `gitea`（2016〜、MIT、GitHub 配布）。`forgejo`（2022 年の Gitea フォーク、GPLv3+、Codeberg 配布）も選べる。CLI も API も同じ形なので olnm からの使い方は変わらない
+- 🧯 forge が使えなくてもダイヤル 0（bare repo + `gbundle`）は git だけで動く
+- 👤 forge は root では起動しない（Gitea / Forgejo の仕様）。普通のユーザーで使う
 - 🐹 Go は不要（配布済みバイナリを使う。ソースからビルドするときだけ要る）
-- ✅ 実機確認: Gitea 1.24.6 で install / bundle / init / up / repo add / push / labels / issue / PR / dial 0〜3 / sync / push mirror 登録
+- 🔖 `hubdial install` は最新版を取る。最新版の問い合わせ（GitHub API / リリースページ）だけ塞がれている環境では、実機確認済みの版（`VERIFIED`、いまは Gitea 1.27.3）に切り替わる。版を固定するなら `--version 1.27.3`
+- 🔑 ダイヤル 2 の push mirror は GitHub トークンをローカル forge の DB に保存する（forge の SECRET_KEY で暗号化）
+- ✅ 実機確認（普通のユーザーで）: Gitea **1.27.3**（2026-08-31）と 1.24.6 — install / bundle / init / up / repo add / push / labels / issue / PR / ダイヤル 0〜3 / ダイヤル 0 でのコミットを sync で forge へ / push mirror 登録。Forgejo は未確認（CLI・API は同じ形）
 ほか `hubdial status | doctor | logs | labels（GitHub 既定ラベル）| api GET /user/repos | repo ls | pr ls`。
 
 ## 🔒 閉域網向け（airgap セクション）
@@ -67,5 +70,5 @@ require("child_process").execFileSync("python3", ["olnm.py", "run", "pycalc", "6
 
 ## テスト
 ```sh
-python3 -m unittest discover     # Forgejo 本体は不要（tests/fake_forgejo.py が CLI と REST の一部を代行）
+python3 -m unittest discover     # forge 本体は不要（tests/fake_forgejo.py が CLI と REST の一部を代行）
 ```
