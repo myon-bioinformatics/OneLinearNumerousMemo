@@ -37,6 +37,42 @@ class TestInputAssistance(unittest.TestCase):
         return subprocess.run([shell, "-c", 'eval "$(python3 "$OLNM_PY" init ' + shell + ')"\n' + script],
                               text=True, capture_output=True, env=env, cwd=self.work, timeout=15)
 
+    def test_offline_install_failure_is_not_hidden_by_sync(self):
+        uv = self.work / 'uv'
+        uv.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$UV_TEST_LOG"\nexit 7\n')
+        uv.chmod(0o755)
+        (self.work / 'wheels').mkdir()
+        log = self.work / 'uv.log'
+        env = dict(self.env, PATH=str(self.work) + os.pathsep + os.environ['PATH'], UV_TEST_LOG=str(log))
+        result = self.shell('uvoffline', env=env)
+        self.assertEqual(result.returncode, 7, result.stderr)
+        self.assertEqual(log.read_text().splitlines(), ['pip install --no-index --find-links wheels -r requirements.txt'])
+
+    def test_uvbundle_stops_if_export_fails(self):
+        uv = self.work / 'uv'
+        uv.write_text('#!/bin/sh\nexit 7\n')
+        uv.chmod(0o755)
+        env = dict(self.env, PATH=str(self.work) + os.pathsep + os.environ['PATH'])
+        result = self.shell('uvbundle', env=env)
+        self.assertEqual(result.returncode, 7, result.stderr)
+        self.assertFalse((self.work / 'wheels').exists())
+
+    def test_jsonf_preserves_jq_failure(self):
+        jq = self.work / 'jq'
+        jq.write_text('#!/bin/sh\nexit 7\n')
+        jq.chmod(0o755)
+        env = dict(self.env, PATH=str(self.work) + os.pathsep + os.environ['PATH'])
+        result = self.shell('jsonf', env=env)
+        self.assertEqual(result.returncode, 7, result.stderr)
+
+    def test_uvbundle_reports_download_failure(self):
+        uv = self.work / 'uv'
+        uv.write_text('#!/bin/sh\nif [ "$1" = export ]; then : > requirements.txt; exit 0; fi\nexit 9\n')
+        uv.chmod(0o755)
+        env = dict(self.env, PATH=str(self.work) + os.pathsep + os.environ['PATH'])
+        result = self.shell('uvbundle', env=env)
+        self.assertEqual(result.returncode, 9, result.stderr)
+
     def test_uv_wrappers_do_not_repeat_sync_or_hide_install_failure(self):
         uv = self.work / 'uv'
         uv.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$UV_TEST_LOG"\n'

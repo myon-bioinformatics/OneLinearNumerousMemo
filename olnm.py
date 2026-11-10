@@ -330,7 +330,7 @@ touchp() { mkdir -p "$(dirname "$1")" && touch "$1"; }
 
 # ───────────────────────── 🔤 text ─────────────────────────
 # 📐 jsonf: pretty-print json (jq → python fallback)
-jsonf() { command -v jq >/dev/null && jq . "$@" || python3 -m json.tool "$@"; }
+jsonf() { if command -v jq >/dev/null; then jq . "$@"; else pyjson "$@"; fi; }
 # 📐 jsonmin: minify json
 jsonmin() { command -v jq >/dev/null && jq -c . "$@" || python3 -c 'import json,sys;print(json.dumps(json.load(sys.stdin),separators=(",",":")))'; }
 # 🔁 y2j: 🌍(first run) yaml → json via uvx pyyaml
@@ -464,9 +464,9 @@ alias1() { printf '# ⭐ %s: %s\n%s() { %s "$@"; }\n' "$1" "$2" "$1" "$2"; }
 # 📦 uvexport: pin lock to requirements.txt (hashes) for hand-off
 uvexport() { uv export --frozen --no-dev --format requirements-txt -o requirements.txt && wc -l requirements.txt; }
 # 🎒 uvbundle: 🌍 build wheels/ from lock for carrying into a closed network (run online side)
-uvbundle() { uvexport && mkdir -p wheels && uv pip download -r requirements.txt -d wheels 2>/dev/null || python3 -m pip download -r requirements.txt -d wheels; ls wheels | wc -l; }
+uvbundle() { uvexport && mkdir -p wheels && uv tool run --from pip pip download -r requirements.txt -d wheels && find wheels -maxdepth 1 -type f | wc -l; }
 # 🔌 uvoffline: sync from cache/wheels without network
-uvoffline() { [ -d wheels ] && uv pip install --no-index --find-links wheels -r requirements.txt || uv sync --offline; }
+uvoffline() { if [ -d wheels ]; then uv pip install --no-index --find-links wheels -r requirements.txt; else uv sync --offline; fi; }
 # 🔌 pipoffline: pip install from local wheels/ only
 pipoffline() { python3 -m pip install --no-index --find-links "${1:-wheels}" -r "${2:-requirements.txt}"; }
 # 🎒 nbundle: 🌍 fill a portable npm cache dir (.npm-cache) for offline `nci`
@@ -504,7 +504,7 @@ cabundle() { [ -f "$1" ] || { echo "file?"; return 1; }; export SSL_CERT_FILE="$
 # 🧾 envreport: snapshot of toolchain + lock hashes → env-report.txt (evidence for reviews)
 envreport() { { echo "# $(date -Iseconds) $(hostname)"; sysinfo; ver; for f in uv.lock package-lock.json bun.lock requirements.txt; do [ -f "$f" ] && sha256sum "$f"; done; } | tee env-report.txt; }
 # 🧾 licenses: list licenses of installed python packages (stdlib metadata only)
-licenses() { python3 -c 'import importlib.metadata as m;[print(f"{d.metadata["Name"]:30} {d.version:12} {(d.metadata.get("License-Expression") or d.metadata.get("License") or "?")[:40]}") for d in sorted(m.distributions(),key=lambda d:d.metadata["Name"].lower())]'; }
+licenses() { python3 -c 'import importlib.metadata as m; [print("{:<30} {:<12} {}".format(d.metadata.get("Name", "?"), d.version, (d.metadata.get("License-Expression") or d.metadata.get("License") or "?")[:40])) for d in sorted(m.distributions(), key=lambda d: (d.metadata.get("Name") or "").lower())]'; }
 # 📋 pyfreeze: pip freeze of current interpreter (uv env if present)
 pyfreeze() { uv pip freeze 2>/dev/null || python3 -m pip freeze; }
 
