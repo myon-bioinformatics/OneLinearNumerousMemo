@@ -1430,9 +1430,37 @@ def run(name: str, *args: str) -> int:
 
 
 def doctor() -> dict:
-    """Optional tools on PATH, the dial, and the forge if set up."""
+    """Inspect tools and old olnm shell configuration without changing anything."""
     res = {t: bool(shutil.which(t)) for t in TOOLS}
     print(" ".join(("✅ " if v else "❌ ") + k for k, v in res.items()))
+    print(f"Python: {sys.executable}\nolnm module: {PY}")
+    executable = shutil.which("olnm")
+    print(f"olnm on PATH: {executable or 'not found'}")
+    print("Shell aliases/functions can shadow this executable; check with: type -a olnm")
+    variables = sorted(k for k in os.environ if k.startswith("OLNM_") or k == "DIAL_FILE")
+    print("Environment variable names (values hidden): " + (", ".join(variables) or "none"))
+    pattern = re.compile(r"\bOLNM_[A-Za-z0-9_]*\b|\bDIAL_FILE\b|\.olnm\.py|\bolnm(?:_\w+)?\b", re.I)
+    found = False
+    for path in (Path.home() / n for n in (".bashrc", ".bash_profile", ".profile", ".zshrc", ".zprofile")):
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            print(f"Cannot inspect {path}: {exc.strerror}")
+            continue
+        for number, line in enumerate(lines, 1):
+            if line.strip() and not line.lstrip().startswith("#") and pattern.search(line):
+                print(f"Possible old setting: {path}:{number} (content hidden)")
+                found = True
+    if not found:
+        print("No matching active lines in the checked shell startup files.")
+    for path in (Path.home() / ".olnm.py", Path.home() / ".olnm"):
+        if path.exists():
+            print(f"Existing file or data: {path}")
+    print("uv setup: uv tool install --force 'git+https://github.com/myon-bioinformatics/OneLinearNumerousMemo.git@main'")
+    print("Review matching startup lines, then open a new shell; run 'uv tool update-shell' if olnm is not on PATH.")
+    print("This check cannot see the parent shell's aliases/functions or files sourced indirectly; it does not delete or modify anything.")
     dial()
     if FSTATE.exists():
         hub_status()

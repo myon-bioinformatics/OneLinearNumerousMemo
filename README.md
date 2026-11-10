@@ -555,6 +555,13 @@ run は呼び出し元の cwd を引き継ぐ。
 候補なしの通常 like は 0、like --hint は候補なしなら 127。
 run は子コマンドの終了コードを返す。call の数値の戻り値は JSON データであり、終了コードではない。
 
+### uv へ整理する前の診断
+
+`olnm doctor` は Python・olnm のパス、ツールの有無、`OLNM_` と `DIAL_FILE` の環境変数名、bash/zsh の主な起動ファイル内の関連行番号、旧 `~/.olnm.py` や `~/.olnm` の存在を表示する。環境変数の値や設定行の内容は表示せず、ファイルの変更や削除は行わない。行番号は候補であり、間接的に読み込まれるファイルや親シェル内の関数・エイリアスは検査できないため、`type -a olnm` も合わせて確認する。
+
+表示された起動ファイルから不要な olnm の設定を外し、新しいシェルを開く。uv に登録するには `uv tool install --force 'git+https://github.com/myon-bioinformatics/OneLinearNumerousMemo.git@main'` を実行する。PATH に見つからない場合は `uv tool update-shell` を実行して新しいシェルを開く。診断は任意ツールが見つからなくても成功終了する。
+
+
 ## ダイヤルと保存先
 
 `OLNM_HOME`（既定 `~/.olnm`）、`DIAL_FILE`（既定 `$OLNM_HOME/dial`）は **Python の起動／import 前**に設定する。
