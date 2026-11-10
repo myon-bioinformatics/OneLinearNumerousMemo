@@ -1690,9 +1690,15 @@ def main(argv: list[str] | None = None) -> int:
             except (ValueError, SyntaxError, ArithmeticError, TypeError, RecursionError, EOFError) as error:
                 print(f"calc: {error}\nTry: olnm calc, then type 6*7 at the prompt; or printf '%s\\n' '6*7' | olnm calc", file=sys.stderr)
                 return 2
-        case "dial": dial(a.level)
+        case "dial":
+            if FSTATE.exists() and (forge := shutil.which("local-forge")):
+                return subprocess.run([forge, "dial", *argv[1:]]).returncode
+            dial(a.level)
         case "run": return run(a.name, *a.args)
-        case "hub": _hub_main(a)
+        case "hub":
+            if forge := shutil.which("local-forge"):
+                return subprocess.run([forge, *argv[1:]]).returncode
+            _hub_main(a)
         case "call":
             try:
                 args, kwargs = json.loads(a.args), json.loads(a.kwargs)

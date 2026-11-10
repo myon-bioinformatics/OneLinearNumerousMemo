@@ -675,6 +675,8 @@ Node、Bun、Go、Rust、uv、mise は PATH 上の実行ファイルとバージ
 
 ## ダイヤルと保存先
 
+`local-forge`（NagoyAction）が PATH にある場合、`olnm hub ...` はそのコマンドに引数と終了コードをそのまま引き渡す。既存 forge の状態がある場合、`olnm dial` も同じツールに委譲する。未導入なら従来の内蔵実装を使う。両方は同じ `OLNM_HOME` / `DIAL_FILE` を参照するため、移行作業中は片方ずつ操作する。
+
 `OLNM_HOME`（既定 `~/.olnm`）、`DIAL_FILE`（既定 `$OLNM_HOME/dial`）は **Python の起動／import 前**に設定する。
 ダイヤル未設定時は 3。
 
