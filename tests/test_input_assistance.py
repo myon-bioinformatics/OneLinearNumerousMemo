@@ -69,7 +69,7 @@ class TestInputAssistance(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("zsh"), "zsh unavailable")
     def test_zsh_completion_registration_and_replies(self):
-        result = self.shell('autoload -Uz compinit; compinit -D; eval "$(python3 "$OLNM_PY" init zsh)"; '
+        result = self.shell('autoload -Uz compinit; compinit -u -D; eval "$(python3 "$OLNM_PY" init zsh)"; '
                             'print -r -- "${_comps[olnm]}"; words=(olnm hub install --flavor ""); CURRENT=5; '
                             'compadd() { printf "%s\\n" "$@"; }; _olnm_complete_zsh', shell="zsh")
         self.assertEqual(result.returncode, 0, result.stderr)
