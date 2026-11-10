@@ -1458,7 +1458,19 @@ def doctor() -> dict:
     for path in (Path.home() / ".olnm.py", Path.home() / ".olnm"):
         if path.exists():
             print(f"Existing file or data: {path}")
-    print("uv setup: uv tool install --force 'git+https://github.com/myon-bioinformatics/OneLinearNumerousMemo.git@main'")
+    if res["uv"]:
+        try:
+            result = subprocess.run(["uv", "tool", "list"], capture_output=True, text=True, timeout=10)
+            if result.returncode:
+                print("uv tool list failed; run 'uv tool list' to inspect the error.")
+            elif re.search(r"(?m)^one-linear-numerous-memo\s", result.stdout):
+                print("uv tool: one-linear-numerous-memo is installed; update with: uv tool upgrade one-linear-numerous-memo")
+            else:
+                print("uv tool: one-linear-numerous-memo was not listed; install with: uv tool install 'git+https://github.com/myon-bioinformatics/OneLinearNumerousMemo.git@main'")
+        except (OSError, subprocess.TimeoutExpired):
+            print("Could not inspect uv tools; run 'uv tool list' manually.")
+    else:
+        print("uv is unavailable on PATH; install uv before installing the olnm tool.")
     print("Review matching startup lines, then open a new shell; run 'uv tool update-shell' if olnm is not on PATH.")
     print("This check cannot see the parent shell's aliases/functions or files sourced indirectly; it does not delete or modify anything.")
     dial()

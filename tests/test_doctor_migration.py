@@ -7,6 +7,21 @@ import unittest
 
 
 class DoctorMigrationTest(unittest.TestCase):
+    def test_uv_tool_registration_changes_guidance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            uv = home / 'uv'
+            uv.write_text('#!/bin/sh\nprintf "one-linear-numerous-memo v0.1.0\\n"\n')
+            uv.chmod(0o755)
+            env = dict(os.environ, HOME=tmp, PATH=tmp, OLNM_HOME=str(home / 'state'),
+                       DIAL_FILE=str(home / 'dial'))
+            source = Path(__file__).resolve().parents[1] / 'olnm.py'
+            result = subprocess.run([sys.executable, str(source), 'doctor'], env=env,
+                                    capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('uv tool upgrade one-linear-numerous-memo', result.stdout)
+            self.assertNotIn('uv tool install --force', result.stdout)
+
     def test_detects_old_settings_without_disclosure_or_changes(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
