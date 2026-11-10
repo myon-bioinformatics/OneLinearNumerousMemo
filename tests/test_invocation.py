@@ -123,6 +123,23 @@ class TestReadmeInvocation(IsolatedInvocation):
     "opt in with OLNM_TEST_UV=1; requires uv and the build backend",
 )
 class TestUvLifecycle(IsolatedInvocation):
+    def test_uv_helper_recipe_as_written_in_readme(self):
+        readme = (ROOT / "README.md").read_text()
+        recipe = next(
+            block for block in re.findall(r"```sh\n(.*?)\n```", readme, re.S)
+            if block.startswith("mkdir olnm-work-demo")
+        )
+        self.env["UV_PYTHON"] = sys.executable
+        self.env["UV_PYTHON_DOWNLOADS"] = "never"
+        self.env.pop("VIRTUAL_ENV", None)
+        result = self.execute(
+            "bash", "-c",
+            'set -e\neval "$(python3 "$OLNM_PY" init bash)"\n' + recipe,
+        )
+        self.assertIn("All checks passed", result.stdout)
+        self.assertEqual(result.stdout.splitlines()[-1], "42")
+        self.assertIn("Ran 1 test", result.stderr)
+
     def test_tool_uvx_project_dependency_and_uninstall(self):
         # Do not install tools or change shell files in the user's real environment.
         self.env.update(

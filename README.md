@@ -381,7 +381,7 @@ mkdir olnm-work-demo
 cd olnm-work-demo
 uvinit olnm-work-demo
 uvdev ruff
-printf 'import unittest\nclass Smoke(unittest.TestCase):\n    def test_answer(self):\n        self.assertEqual(6*7, 42)\n' > test_smoke.py
+printf 'import unittest\n\n\nclass Smoke(unittest.TestCase):\n    def test_answer(self):\n        self.assertEqual(6*7, 42)\n' > test_smoke.py
 uvtest
 uvcheck
 uvpy -c 'print(6*7)'
