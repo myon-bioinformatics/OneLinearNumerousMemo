@@ -17,14 +17,17 @@ and Node / Bun (`execFileSync("python3", ["olnm.py", "run", "pycalc", "2**10"])`
 from __future__ import annotations
 
 import argparse
+import ast
 import base64
 import contextlib
 import difflib
 import hashlib
 import json
+import math
 import os
 import re
 import secrets
+import shlex
 import shutil
 import signal
 import subprocess
@@ -38,14 +41,14 @@ PY = Path(__file__).resolve()
 OLNM_HOME = Path(os.environ.get("OLNM_HOME", Path.home() / ".olnm"))
 DIAL_FILE = Path(os.environ.get("DIAL_FILE", OLNM_HOME / "dial"))
 DIALS = {0: "🔌 offline", 1: "🏠 local", 2: "🔁 mirror", 3: "☁️ github"}
-TOOLS = ("python3", "uv", "node", "npm", "npx", "bun", "git", "gh", "fzf", "fd", "rg", "jq", "curl", "docker", "tmux", "entr", "tree")
+TOOLS = ("python3", "uv", "node", "npm", "npx", "bun", "rustc", "cargo", "rustup", "git", "gh", "fzf", "fd", "rg", "jq", "curl", "docker", "tmux", "entr", "tree")
 HELP = re.compile(r"^# (\S+) ([A-Za-z_0-9]+): (.*)$")
 SECTION = re.compile(r"^# ─+ (\S+) (\S+) ─+$")
 
 # ───────────────────────── 📖 meta (shell shims → this file) ─────────────────────────
 META = r"""
 # 📖 olnm: list one-liners (olnm git = one section)
-olnm() { python3 "$OLNM_PY" ls "$@"; }
+olnm() { if [ "$#" -eq 1 ]; then case " $_OLNM_SECTIONS " in *" $1 "*) python3 "$OLNM_PY" ls "$@"; return $?;; esac; fi; case "${1-}" in -h|--help|init|ls|grep|like|sections|net|doctor|dial|run|call|hub|complete|calc|tools) python3 "$OLNM_PY" "$@";; *) python3 "$OLNM_PY" ls "$@";; esac; }
 # 🔎 olnm_grep: search help text (olnm_grep json)
 olnm_grep() { python3 "$OLNM_PY" grep "$@"; }
 # 🤔 olnm_like: closest names to a typo or fragment (olnm_like uvtets)
@@ -65,12 +68,13 @@ olnm_reload() { eval "$(python3 "$OLNM_PY" init)" && echo "🔄 $OLNM_PY"; }
 # 📝 olnm_edit: open olnm.py in $EDITOR
 olnm_edit() { "${EDITOR:-vi}" "$OLNM_PY" && olnm_reload; }
 # ⬇️ olnm_update: 🌍 re-download olnm.py from $OLNM_URL and reload
-olnm_update() { [ -n "$OLNM_URL" ] || { echo "set OLNM_URL"; return 1; }; curl -fsSL "$OLNM_URL" -o "$OLNM_PY.new" && python3 "$OLNM_PY.new" ls >/dev/null && mv "$OLNM_PY.new" "$OLNM_PY" && olnm_reload; }
+olnm_update() { [ -n "${OLNM_URL:-}" ] || { printf '%s\n' 'File install: set OLNM_URL to the reviewed raw olnm.py URL, then olnm_update.' 'uv tool install: use uv tool upgrade one-linear-numerous-memo; then eval "$(command olnm init)".' >&2; return 1; }; curl -fsSL "$OLNM_URL" -o "$OLNM_PY.new" && python3 "$OLNM_PY.new" --help >/dev/null && mv "$OLNM_PY.new" "$OLNM_PY" && olnm_reload; }
 # 🔢 olnm_steps: non-blank lines of olnm.py
 olnm_steps() { grep -cve '^\s*$' "$OLNM_PY"; }
 _olnm_d() { cat "$DIAL_FILE" 2>/dev/null || echo 3; }
 _olnm_hub() { [ "$(_olnm_d)" -le 2 ] && [ -f "$OLNM_HOME/forge/state.json" ]; }
 _olnm_cnf() { python3 "$OLNM_PY" like "$1" --hint >&2; return 127; }
+_olnm_require() { local tool; for tool in "$@"; do command -v "$tool" >/dev/null 2>&1 || { python3 "$OLNM_PY" tools "$tool" >&2; return 127; }; done; }
 """
 
 SHELL = r"""
@@ -112,7 +116,7 @@ pyhttp() { python3 -m http.server "${1:-8000}"; }
 # 📐 pyjson: pretty-print json from file or stdin
 pyjson() { python3 -m json.tool "$@"; }
 # 🧮 pycalc: evaluate math expression (pycalc '2**10')
-pycalc() { python3 -c "from math import *; print($*)"; }
+pycalc() { if [ "$#" -eq 0 ]; then python3 "$OLNM_PY" calc; else python3 -c "from math import *; print($*)"; fi; }
 # 📥 pyimp: check if module is importable and where (pyimp numpy)
 pyimp() { python3 -c "import importlib,sys; m=importlib.import_module(sys.argv[1]); print(m.__name__, getattr(m,'__version__','?'), m.__file__)" "$1"; }
 # 📦 pymods: list top-level importable third-party modules
@@ -589,6 +593,11 @@ def ls(section: str | None = None, offline: bool = False) -> list[dict]:
     rows = [e for e in entries() if (not section or e["section"] == section) and not (offline and e["net"])]
     if section and not rows:
         print(f"🤔 no section {section!r} → {' '.join(_sections())}")
+        if section not in _sections():
+            commands = next(a.choices for a in build_parser()._actions if isinstance(a, argparse._SubParsersAction))
+            candidates = difflib.get_close_matches(section, [*_sections(), *commands], n=3, cutoff=0.5)
+            if candidates:
+                print("did you mean: " + ", ".join(candidates) + "? Use olnm ls SECTION or olnm COMMAND --help", file=sys.stderr)
     for e in rows:
         print(f"{e['section']:<8} {e['emoji']} {e['name']:<14} {e['desc']}")
     return rows
@@ -1095,21 +1104,185 @@ def hub_doctor() -> dict:
 HUB_SUBS = "install bundle init up down status doctor logs dial repo api issue pr labels sync"
 
 
+_RUNTIME_GUIDES = {
+    "node": ("https://nodejs.org/en/download", "With nvm installed: nvm install 26 && nvm use 26",
+             "Record 26 in .nvmrc; run nvm use in the project. npm install installs project dependencies, not Node."),
+    "bun": ("https://bun.sh/docs/installation", "Install Bun for this WSL/Linux user using the official guide; then check bun --version.",
+            "Check ~/.bun/bin is on PATH. bun install installs project dependencies, not Bun."),
+    "rust": ("https://rust-lang.org/tools/install", "Install the Rust toolchain with rustup; then check rustc --version and cargo --version.",
+             "Check ~/.cargo/bin is on PATH. Pin the project toolchain in rust-toolchain.toml; build output goes to target/."),
+}
+
+
+def tools(name: str | None = None) -> dict:
+    """Explain optional runtime setup without installing anything or changing the project."""
+    aliases = {"npm": "node", "npx": "node", "bunx": "bun", "rustc": "rust", "cargo": "rust", "rustup": "rust"}
+    key = aliases.get(name, name)
+    if key is not None and key not in _RUNTIME_GUIDES:
+        raise ValueError("choose node, bun or rust")
+    result = {}
+    for runtime in ([key] if key else _RUNTIME_GUIDES):
+        executables = {"node": ("node", "npm", "npx"), "bun": ("bun", "bunx"), "rust": ("rustc", "cargo", "rustup")}[runtime]
+        found = {exe: shutil.which(exe) for exe in executables}
+        url, setup, project = _RUNTIME_GUIDES[runtime]
+        result[runtime] = found
+        print(f"{runtime}: " + ", ".join(f"{exe}={path or 'not found on PATH'}" for exe, path in found.items()))
+        print(f"  {setup}\n  {project}\n  {url}")
+    print("Ubuntu/WSL does not guarantee these runtimes are installed. Install per user; project dependencies stay in the work directory. olnm itself needs no Node/Bun/Rust.")
+    return result
+
+
+def calc(expression: str) -> int | float:
+    """Evaluate bounded arithmetic only; no Python statements, attributes, imports or shell execution."""
+    if len(expression) > 1000:
+        raise ValueError("expression must be at most 1000 characters")
+    tree = ast.parse(expression.strip(), mode="eval")
+    if sum(1 for _ in ast.walk(tree)) > 128:
+        raise ValueError("expression is too complex (maximum 128 syntax nodes)")
+    functions = {n: getattr(math, n) for n in ("sqrt", "sin", "cos", "tan", "log", "log2", "log10", "exp", "ceil", "floor")}
+    functions.update(abs=abs, round=round, min=min, max=max)
+    constants = {n: getattr(math, n) for n in ("pi", "e", "tau")}
+
+    def bounded(value):
+        if type(value) not in (int, float):
+            raise ValueError("only real numbers are supported")
+        if isinstance(value, int) and value.bit_length() > 4096:
+            raise ValueError("integer exceeds 4096 bits")
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ValueError("result must be finite")
+        return value
+
+    def visit(node):
+        if isinstance(node, ast.Constant):
+            return bounded(node.value)
+        if isinstance(node, ast.Name) and node.id in constants:
+            return constants[node.id]
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+            v = visit(node.operand)
+            return bounded(v if isinstance(node.op, ast.UAdd) else -v)
+        if isinstance(node, ast.BinOp):
+            a, b = visit(node.left), visit(node.right)
+            match node.op:
+                case ast.Add(): value = a + b
+                case ast.Sub(): value = a - b
+                case ast.Mult(): value = a * b
+                case ast.Div(): value = a / b
+                case ast.FloorDiv(): value = a // b
+                case ast.Mod(): value = a % b
+                case ast.Pow():
+                    if abs(b) > 1000:
+                        raise ValueError("absolute exponent must be <= 1000")
+                    if isinstance(a, int) and isinstance(b, int) and b > 0 and a.bit_length() * b > 4096:
+                        raise ValueError("power may exceed 4096 bits")
+                    value = a ** b
+                case _: raise ValueError("unsupported operator")
+            return bounded(value)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in functions and not node.keywords:
+            return bounded(functions[node.func.id](*(visit(a) for a in node.args)))
+        raise ValueError("use numbers, + - * / // % **, pi/e/tau or supported math functions")
+
+    return visit(tree.body)
+
+
+def _completion(words: list[str]) -> list[str]:
+    """Pure completion: no filesystem scans, service calls or execution."""
+    command, *tokens = words or ["olnm", ""]
+    if not tokens:
+        tokens = [""]
+    prefix = tokens[-1]
+    if command in {"olnm_offline", "olnm_like"}:
+        pool = _sections() if command == "olnm_offline" else names()
+        return sorted(n for n in pool if n.startswith(prefix))
+    tokens = ({"hubdial": ["hub"], "olnm_dial": ["dial"]}.get(command, []) + tokens)
+    parser, path, index, pending = build_parser(), [], 0, None
+    for token in tokens[:-1]:
+        if pending is not None:
+            pending = None
+            continue
+        options = {opt: action for action in parser._actions for opt in action.option_strings}
+        if token in options:
+            if options[token].nargs != 0:
+                pending = options[token]
+            continue
+        positional = [a for a in parser._actions if not a.option_strings]
+        if index >= len(positional):
+            return []
+        action = positional[index]
+        if isinstance(action, argparse._SubParsersAction):
+            if token not in action.choices:
+                return []
+            parser = action.choices[token]
+            path.append(token)
+            index = 0
+        elif action.nargs not in (argparse.REMAINDER, "+", "*"):
+            index += 1
+    positional = [a for a in parser._actions if not a.option_strings]
+    action = pending or (positional[index] if index < len(positional) else None)
+    if pending:
+        pool = [str(c) for c in pending.choices or []]
+    elif prefix.startswith("-"):
+        pool = [opt for a in parser._actions for opt in a.option_strings]
+    elif action is not None and action.choices is not None:
+        pool = [str(c) for c in action.choices]
+        if not path:
+            pool += _sections()
+    elif action is not None and (path, action.dest) == (["ls"], "section"):
+        pool = _sections()
+    elif action is not None and (path, action.dest) == (["run"], "name"):
+        pool = names()
+    elif action is not None and (path, action.dest) == (["call"], "fn"):
+        pool = public()
+    else:
+        pool = []
+    return sorted({p for p in pool if p.startswith(prefix)})
+
+
+def complete(*words: str) -> list[str]:
+    """Print candidates for shell words including command name and current (possibly empty) word."""
+    candidates = _completion(list(words))
+    if candidates:
+        print("\n".join(candidates))
+    return candidates
+
+
 def init(shell: str | None = None) -> str:
     """Shell code to eval: functions + dial stubs + typo hook + completion."""
     shell = shell or ("zsh" if "zsh" in os.environ.get("SHELL", "") else "bash")
-    parts = [f'OLNM_PY="{PY}"', f'OLNM_HOME="${{OLNM_HOME:-{OLNM_HOME}}}"', f'DIAL_FILE="${{DIAL_FILE:-{DIAL_FILE}}}"', META, SHELL]
+    # Quote literal paths; preserve only the intended environment overrides.
+    parts = [f'OLNM_PY={shlex.quote(str(PY))}', f'OLNM_HOME=${{OLNM_HOME:-{shlex.quote(str(OLNM_HOME))}}}', f'DIAL_FILE=${{DIAL_FILE:-{shlex.quote(str(DIAL_FILE))}}}', f'_OLNM_SECTIONS={shlex.quote(" ".join(_sections()))}', META]
+    guarded = SHELL
+    for entry in entries():
+        if entry["section"] in {"node", "bun"}:
+            # Guard the executable actually used, not every optional tool in the section.
+            body = re.search(r"^" + re.escape(entry["name"]) + r"\(\) \{ (.*)$", SHELL, re.M).group(1)
+            executable = body.split()[0]
+            required = {"nv": "node npm npx", "nclean": "npm", "nupall": "npx npm"}.get(entry["name"], executable)
+            if required.split()[0] in {"node", "npm", "npx", "bun", "bunx"}:
+                head = f'{entry["name"]}() {{ '
+                guarded = guarded.replace(head, head + f'_olnm_require {required} || return $?; ', 1)
+    parts.append(guarded)
     if read_dial() <= 1:
         for e in entries():
             if e["net"]:
                 parts.append(f'{e["name"]}() {{ echo "🔌 {e["name"]}: 🌍 needs dial ≥2 (now $(_olnm_d)) → olnm_dial 2" >&2; return 1; }}')
-    secs = " ".join(_sections())
     if shell == "zsh":
         parts.append('command_not_found_handler() { _olnm_cnf "$@"; }')
-        parts.append(f'(( $+functions[compdef] )) && {{ compdef "_arguments \\"1:section:({secs})\\"" olnm olnm_offline; compdef "_arguments \\"1:sub:({HUB_SUBS})\\"" hubdial; }}')
+        parts.append(r'''_olnm_complete_zsh() {
+  local -a candidates
+  candidates=("${(@f)$(python3 "$OLNM_PY" complete -- "${words[@]:0:$CURRENT}")}")
+  (( ${#candidates} )) && compadd -- "${candidates[@]}"
+}
+(( $+functions[compdef] )) && compdef _olnm_complete_zsh olnm olnm_offline olnm_like olnm_dial hubdial
+''')
     else:
         parts.append('command_not_found_handle() { _olnm_cnf "$@"; }')
-        parts.append(f'complete -W "{secs}" olnm olnm_offline; complete -W "0 1 2 3" olnm_dial; complete -W "{HUB_SUBS}" hubdial')
+        parts.append(r'''_olnm_complete_bash() {
+  local candidate
+  COMPREPLY=()
+  while IFS= read -r candidate; do COMPREPLY+=("$candidate"); done < <(python3 "$OLNM_PY" complete -- "${COMP_WORDS[@]:0:COMP_CWORD+1}")
+}
+complete -o default -F _olnm_complete_bash olnm olnm_offline olnm_like olnm_dial hubdial
+''')
     code = "\n".join(parts) + "\n"
     print(code, end="")
     return code
@@ -1118,9 +1291,10 @@ def init(shell: str | None = None) -> str:
 def run(name: str, *args: str) -> int:
     """Run one one-liner in a non-interactive bash (for Node / Bun / Python callers)."""
     if name not in names():
-        like(name, hint=True)
+        with contextlib.redirect_stdout(sys.stderr):
+            like(name, hint=True)
         return 127
-    return subprocess.run(["bash", "-c", f'eval "$(python3 "{PY}" init bash)"; {name} "$@"', name, *args]).returncode
+    return subprocess.run(["bash", "-c", f'eval "$(python3 {shlex.quote(str(PY))} init bash)"; {name} "$@"', name, *args]).returncode
 
 
 def doctor() -> dict:
@@ -1142,19 +1316,49 @@ def call(fn: str, args: list | None = None, kwargs: dict | None = None):
     """Call a public function by name; the CLI prints the result as JSON (progress goes to stderr)."""
     f = globals().get(fn)
     if fn.startswith("_") or not callable(f) or fn in {"main", "call", "build_parser"}:
-        raise SystemExit(f"❌ no function {fn!r} → {' '.join(public())}")
+        candidates = difflib.get_close_matches(fn, public(), n=3, cutoff=0.5)
+        hint = " → did you mean: " + ", ".join(candidates) if candidates else ""
+        raise SystemExit(f"❌ no function {fn!r}{hint}. See olnm call public")
     return f(*(args or []), **(kwargs or {}))
 
 
 # ───────────────────────── 🧭 cli ─────────────────────────
+class _Parser(argparse.ArgumentParser):
+    """Suggest corrections on Python 3.11+ without changing or executing the input."""
+
+    def error(self, message):
+        match = re.search(r"invalid choice: '([^']+)'", message)
+        pool = [str(c) for a in self._actions if a.choices is not None for c in a.choices]
+        if match:
+            word = match.group(1)
+        elif message.startswith("unrecognized arguments: "):
+            word = message.split(": ", 1)[1].split()[0]
+            def options(parser):
+                for action in parser._actions:
+                    yield from action.option_strings
+                    if isinstance(action, argparse._SubParsersAction):
+                        for child in action.choices.values():
+                            yield from options(child)
+            pool = sorted(set(options(self)))
+        else:
+            word = ""
+        candidates = difflib.get_close_matches(word, pool, n=3, cutoff=0.5) if word else []
+        if candidates:
+            message += "\n  did you mean: " + ", ".join(candidates) + "? See " + self.prog + " --help"
+        super().error(message)
+
+
 def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog="olnm", description="🧷 OneLinearNumerousMemo")
+    ap = _Parser(prog="olnm", description="🧷 OneLinearNumerousMemo")
     sp = ap.add_subparsers(dest="cmd", required=True)
     s = sp.add_parser("init", help="🐚 print shell code to eval"); s.add_argument("shell", nargs="?", choices=["bash", "zsh"])
     s = sp.add_parser("ls", help="📖 list"); s.add_argument("section", nargs="?"); s.add_argument("--offline", action="store_true")
     s = sp.add_parser("grep", help="🔎 search"); s.add_argument("words", nargs="+")
     s = sp.add_parser("like", help="🤔 closest names"); s.add_argument("word"); s.add_argument("--hint", action="store_true")
     sp.add_parser("sections", help="🗂️ sections"); sp.add_parser("net", help="🌍 internet-needing names"); sp.add_parser("doctor", help="🩺 tools")
+    s = sp.add_parser("complete", help="Tab candidates (shell command and words, ending with current word)"); s.add_argument("words", nargs=argparse.REMAINDER)
+    s = sp.add_parser("calc", help="arithmetic; no arguments prompts for an expression without shell quoting"); s.add_argument("expression", nargs=argparse.REMAINDER)
+    s = sp.add_parser("tools", help="optional Node/Bun/Rust setup and project-local usage (no installation)"); s.add_argument("name", nargs="?", choices=["node", "npm", "npx", "bun", "bunx", "rust", "rustc", "cargo", "rustup"])
     s = sp.add_parser("dial", help="🎛️ show/set dial"); s.add_argument("level", nargs="?", type=int, choices=sorted(DIALS))
     s = sp.add_parser("run", help="▶️ run one one-liner in bash"); s.add_argument("name"); s.add_argument("args", nargs=argparse.REMAINDER)
     s = sp.add_parser("call", help="🔌 call a function by name → JSON"); s.add_argument("fn"); s.add_argument("args", nargs="?", default="[]"); s.add_argument("--kwargs", default="{}")
@@ -1201,18 +1405,52 @@ def main(argv: list[str] | None = None) -> int:
     a = build_parser().parse_args(argv)
     match a.cmd:
         case "init": init(a.shell)
-        case "ls": ls(a.section, a.offline)
+        case "ls":
+            ls(a.section, a.offline)
+            return 2 if a.section and a.section not in _sections() else 0
         case "grep": grep(*a.words)
         case "like": return 0 if like(a.word, a.hint) or not a.hint else 127
         case "sections": sections()
         case "net": net()
         case "doctor": doctor()
+        case "complete": complete(*(a.words[1:] if a.words[:1] == ["--"] else a.words))
+        case "tools": tools(a.name)
+        case "calc":
+            try:
+                if a.expression:
+                    expression = " ".join(a.expression[1:] if a.expression[:1] == ["--"] else a.expression)
+                elif sys.stdin.isatty():
+                    print("Expression (e.g. 6*7 or sqrt(81); no surrounding quotes): ", end="", file=sys.stderr, flush=True)
+                    try:
+                        import readline
+                    except ImportError:
+                        pass
+                    else:
+                        symbols = sorted(["pi", "e", "tau", "abs(", "round(", "min(", "max("] +
+                                         [n + "(" for n in ("sqrt", "sin", "cos", "tan", "log", "log2", "log10", "exp", "ceil", "floor")])
+                        readline.set_completer(lambda text, state: ([n for n in symbols if n.startswith(text)] + [None])[state])
+                        readline.parse_and_bind("bind ^I rl_complete" if "libedit" in (readline.__doc__ or "") else "tab: complete")
+                    expression = input()
+                else:
+                    expression = sys.stdin.read(1002)
+                print(calc(expression))
+            except (ValueError, SyntaxError, ArithmeticError, TypeError, RecursionError, EOFError) as error:
+                print(f"calc: {error}\nTry: olnm calc, then type 6*7 at the prompt; or printf '%s\\n' '6*7' | olnm calc", file=sys.stderr)
+                return 2
         case "dial": dial(a.level)
         case "run": return run(a.name, *a.args)
         case "hub": _hub_main(a)
         case "call":
+            try:
+                args, kwargs = json.loads(a.args), json.loads(a.kwargs)
+            except json.JSONDecodeError as error:
+                print(f"call: invalid JSON ({error.msg}). Use an array for args and an object for --kwargs.\nExample: olnm call like '[\"uvtets\"]' --kwargs '{{\"n\":2}}'", file=sys.stderr)
+                return 2
+            if not isinstance(args, list) or not isinstance(kwargs, dict):
+                print("call: args must be a JSON array; --kwargs must be a JSON object. See olnm call --help", file=sys.stderr)
+                return 2
             with contextlib.redirect_stdout(sys.stderr):
-                out = call(a.fn, json.loads(a.args), json.loads(a.kwargs))
+                out = call(a.fn, args, kwargs)
             print(json.dumps(out, ensure_ascii=False, default=str))
     return 0
 
