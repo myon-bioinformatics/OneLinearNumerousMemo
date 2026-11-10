@@ -37,6 +37,18 @@ class TestInputAssistance(unittest.TestCase):
         return subprocess.run([shell, "-c", 'eval "$(python3 "$OLNM_PY" init ' + shell + ')"\n' + script],
                               text=True, capture_output=True, env=env, cwd=self.work, timeout=15)
 
+    def test_uv_wrappers_do_not_repeat_sync_or_hide_install_failure(self):
+        uv = self.work / 'uv'
+        uv.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$UV_TEST_LOG"\n'
+                      'if [ "$1 $2" = "python install" ]; then exit 7; fi\n')
+        uv.chmod(0o755)
+        log = self.work / 'uv.log'
+        env = dict(self.env, PATH=str(self.work) + os.pathsep + os.environ['PATH'], UV_TEST_LOG=str(log))
+        result = self.shell('uvadd demo; uvpys 3.11 3.12; echo "exit=$?"; uvpys', env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('exit=7', result.stdout)
+        self.assertEqual(log.read_text().splitlines(), ['add demo', 'python install 3.11 3.12', 'python list --only-installed'])
+
     def test_completion_context_and_prefix(self):
         cases = [
             (("olnm", "ru"), ["run"]),

@@ -92,7 +92,7 @@ uvupall() { uv lock --upgrade && uv sync; }
 # 🆕 uvinit: new project in current dir (uvinit [name])
 uvinit() { uv init ${1:+--name "$1"} && uv sync; }
 # ➕ uvadd: 🌍 add package(s) and sync
-uvadd() { uv add "$@" && uv sync; }
+uvadd() { uv add "$@"; }
 # ➕ uvdev: 🌍 add dev package(s)
 uvdev() { uv add --dev "$@"; }
 # 🐍 uvpy: python REPL inside locked env
@@ -106,7 +106,7 @@ uvbuild() { uv build "$@"; }
 # 🔁 uvresync: 🌍 delete lock and resolve from scratch
 uvresync() { rm -f uv.lock && uv lock && uv sync; }
 # 🐍 uvpys: list / 🌍 install pythons (uvpys 3.13)
-uvpys() { [ -n "$1" ] && uv python install "$1" || uv python list --only-installed; }
+uvpys() { if [ "$#" -gt 0 ]; then uv python install "$@"; else uv python list --only-installed; fi; }
 
 # ───────────────────────── 🐍 python ─────────────────────────
 # 🐍 pyv: python version + path
@@ -1433,7 +1433,20 @@ def doctor() -> dict:
     """Inspect tools and old olnm shell configuration without changing anything."""
     res = {t: bool(shutil.which(t)) for t in TOOLS}
     print(" ".join(("✅ " if v else "❌ ") + k for k, v in res.items()))
-    print(f"Python: {sys.executable}\nolnm module: {PY}")
+    print(f"Python running olnm: {sys.version.split()[0]} ({sys.executable})")
+    print(f"python3 on PATH: {shutil.which('python3') or 'not found'}\nolnm module: {PY}")
+    for runtime in ("uv", "mise", "node", "bun", "go", "rustc"):
+        path = shutil.which(runtime)
+        if not path:
+            print(f"{runtime}: not found on PATH")
+            continue
+        try:
+            version = subprocess.run([path, "version" if runtime == "go" else "--version"],
+                                     capture_output=True, text=True, timeout=5)
+            line = version.stdout.strip().splitlines()
+            print(f"{runtime}: {line[0] if version.returncode == 0 and line else 'version unavailable'} ({path})")
+        except (OSError, subprocess.TimeoutExpired):
+            print(f"{runtime}: version unavailable ({path})")
     executable = shutil.which("olnm")
     print(f"olnm on PATH: {executable or 'not found'}")
     print("Shell aliases/functions can shadow this executable; check with: type -a olnm")
@@ -1459,6 +1472,14 @@ def doctor() -> dict:
         if path.exists():
             print(f"Existing file or data: {path}")
     if res["uv"]:
+        try:
+            pythons = subprocess.run(["uv", "python", "list", "--only-installed", "--managed-python"], capture_output=True, text=True, timeout=10)
+            if pythons.returncode:
+                print("Could not list uv-managed Python versions; run 'uv python list --only-installed --managed-python'.")
+            else:
+                print("uv-managed Python versions:\n" + (pythons.stdout.strip() or "  none installed"))
+        except (OSError, subprocess.TimeoutExpired):
+            print("Could not inspect uv-managed Python versions; run 'uv python list --only-installed --managed-python'.")
         try:
             result = subprocess.run(["uv", "tool", "list"], capture_output=True, text=True, timeout=10)
             if result.returncode:
