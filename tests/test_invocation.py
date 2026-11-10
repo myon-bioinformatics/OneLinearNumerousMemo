@@ -77,14 +77,14 @@ class TestReadmeInvocation(IsolatedInvocation):
         (self.work / "file with spaces.json").write_text('{"answer":42}')
         result = self.cli("run", "pyjson", "file with spaces.json")
         self.assertEqual(json.loads(result.stdout), {"answer": 42})
-        result = self.cli("run", "pycalc", '"hello world"')
-        self.assertEqual(result.stdout.strip(), "hello world")
+        result = self.cli("calc", "6 mul 7")
+        self.assertEqual(result.stdout.strip(), "42")
 
     def test_source_file_with_spaces_and_hidden_filename(self):
         source = self.work / ".olnm.py"
         shutil.copyfile(SOURCE, source)
         self.env["OLNM_PY"] = str(source)
-        result = self.execute(sys.executable, source, "run", "pycalc", "6*7")
+        result = self.execute(sys.executable, source, "calc", "6*7")
         self.assertEqual(result.stdout.strip(), "42")
         result = self.execute(
             sys.executable, "-c",
@@ -100,7 +100,7 @@ class TestReadmeInvocation(IsolatedInvocation):
         self.cli("dial", "0")
         result = self.cli("run", "myip", expected=1)
         self.assertIn("needs dial", result.stderr)
-        self.assertEqual(self.cli("run", "pycalc", "6*7").stdout.strip(), "42")
+        self.assertEqual(self.cli("calc", "6*7").stdout.strip(), "42")
         self.assertEqual(json.loads(self.cli("call", "read_dial").stdout), 0)
 
     def test_all_cli_help_paths(self):
@@ -167,20 +167,20 @@ class TestUvLifecycle(IsolatedInvocation):
         def uv(*args, **kwargs):
             return self.execute("uv", *args, **kwargs)
 
-        result = uv("run", "--no-project", source / "olnm.py", "run", "pycalc", "6*7")
+        result = uv("run", "--no-project", source / "olnm.py", "calc", "6", "mul", "7")
         self.assertEqual(result.stdout.strip(), "42")
         uv("tool", "install", ".", cwd=source)
         self.assertIn("one-linear-numerous-memo", uv("tool", "list").stdout)
-        self.assertEqual(self.execute("olnm", "run", "pycalc", "6*7").stdout.strip(), "42")
+        self.assertEqual(self.execute("olnm", "calc", "6", "mul", "7").stdout.strip(), "42")
         result = self.execute("olnm", "call", "like", '["uvtets"]')
         self.assertEqual(json.loads(result.stdout)[0], "uvtest")
         result = self.execute(
             "bash", "-c",
-            'eval "$(olnm init bash)"; pycalc "6*7"; command olnm run pycalc "6*7"',
+            'eval "$(olnm init bash)"; calc "6*7"; command olnm run calc "6*7"',
         )
         self.assertEqual(result.stdout.splitlines(), ["42", "42"])
         uv("tool", "install", "--force", ".", cwd=source)
-        result = uv("tool", "run", "--from", str(source), "olnm", "run", "pycalc", "6*7")
+        result = uv("tool", "run", "--from", str(source), "olnm", "calc", "6", "mul", "7")
         self.assertEqual(result.stdout.strip(), "42")
         result = uv(
             "run", "--no-project", "--with", str(source), "python", "-c",
@@ -194,7 +194,7 @@ class TestUvLifecycle(IsolatedInvocation):
         uv("sync", "--locked", cwd=project)
         result = uv(
             "run", "--locked", "python", "-c",
-            'import olnm, sys; sys.exit(olnm.run("pycalc", "6*7"))', cwd=project,
+            'import olnm, sys; sys.exit(olnm.calculate(*sys.argv[1:]))', "6", "mul", "7", cwd=project,
         )
         self.assertEqual(result.stdout.strip(), "42")
         # The installation must work away from the source directory.

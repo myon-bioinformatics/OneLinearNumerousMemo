@@ -60,7 +60,7 @@ class TestHelpers(unittest.TestCase):
         self.assertIn("did you mean: uvtest", r.stderr)
 
     def test_one_liners_work(self):
-        cases = {"pycalc '2**10'": "1024", "ncalc '2**10'": "1024", "printf '1\\n2\\n' | nums": "n=2 sum=3 avg=1.5 min=1 max=2",
+        cases = {"calc '2**10'": "1024", "calc --engine node '2**10'": "1024", "printf '1\\n2\\n' | nums": "n=2 sum=3 avg=1.5 min=1 max=2",
                  "echo 'x a@b.co 10.0.0.1' | redact": "x <email> <ip>", "printf 'x=1\\n' | t2j | tr -d ' \\n'": '{"x":1}'}
         for cmd, want in cases.items():
             with self.subTest(cmd):
@@ -83,7 +83,7 @@ class TestDial(unittest.TestCase):
         olnm.dial(0)
         r = bash("myip; echo rc=$?")
         self.assertIn("needs dial ≥2", r.stderr); self.assertIn("rc=1", r.stdout)
-        self.assertEqual(bash("pycalc 1+1").stdout.strip(), "2")  # offline ones untouched
+        self.assertEqual(bash("calc 1+1").stdout.strip(), "2")  # offline ones untouched
         olnm.dial(2)
         self.assertNotIn("needs dial", bash("declare -f myip").stdout)
 
@@ -243,7 +243,7 @@ class TestInterop(unittest.TestCase):
         self.assertEqual(json.loads(out)[0], "uvtest")
 
     def test_node_and_bun_run(self):
-        js = 'const {execFileSync}=require("child_process");process.stdout.write(execFileSync("python3",[process.argv[1],"run","pycalc","6*7"]).toString())'
+        js = 'const {execFileSync}=require("child_process");process.stdout.write(execFileSync("python3",[process.argv[1],"run","calc","6*7"]).toString())'
         for rt in ("node", "bun"):
             if shutil.which(rt):
                 with self.subTest(rt):
