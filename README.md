@@ -1,6 +1,6 @@
 # 🧷 OneLinearNumerousMemo (olnm)
 
-bash/zsh 用の **241 個のシェル関数**と、ローカル GitHub（Gitea / Forgejo）を扱う **36 個の Python API**。
+bash/zsh 用の **242 個のシェル関数**と、ローカル GitHub（Gitea / Forgejo）を扱う **37 個の Python API**。
 実装は `olnm.py` 1 ファイル、実行時の Python 外部依存はゼロ。
 Python 3.11 以降、Linux（Ubuntu / WSL の Ubuntu）の bash/zsh を対象とする。
 macOS では GNU コマンドとの差異があり、PowerShell/cmd からシェル関数を使う場合は WSL 内で実行する。
@@ -11,6 +11,7 @@ Node / Bun / gh / Docker / fzf などは、それを使う関数を実行する�
 - [最初の成功まで](#最初の成功まで)
 - [呼び出し方の選び方](#呼び出し方の選び方)
 - [bash/zsh に関数を登録する](#bashzsh-に関数を登録する)
+- [yourself：登録なしの環境レポート](#yourself登録なしの環境レポート)
 - [Python のワンライナーから使う](#python-のワンライナーから使う)
 - [JSON で関数を呼ぶ call](#json-で関数を呼ぶ-call)
 - [uv：ファイルを実行する](#uvファイルを実行する)
@@ -123,6 +124,63 @@ source "$HOME/.local/share/olnm/olnm.sh"
 
 一覧・ダイヤル・hub などは引き続き `olnm.py` と python3 を呼ぶ。
 `olnm.sh` だけ持ち込めば全機能が Python 不要になるわけではない。
+
+## yourself：登録なしの環境レポート
+
+**olnm を読み込めば `yourself` と打つだけで利用できる。**
+標準ライブラリだけで動く [yourself.py](https://github.com/myon-bioinformatics/yourself) を、変更せず olnm.py の中に同梱している。
+追加のインストール・登録・ファイル配置・実行時ダウンロードは不要。olnm.py だけを別の場所へ持ち込んでも使える。
+Python の組み込み標準モジュールという意味ではなく、外部Python依存が不要なモジュールである。
+
+bash/zsh に定義を eval 済みなら：
+
+```sh
+yourself
+yourself --minimal --format json
+yourself --help
+```
+
+引数なしでは元の yourself と同じ、現在の作業ディレクトリを対象とする環境レポートになる。
+最小JSONだけなら `--minimal --format json`。出力内容は実行環境によって変わり、最小JSONには schema_version / os / runtime が含まれる。
+`--versions` / `--reach` など元のオプションもそのまま受け取る。観測の範囲・通信・実行の有無は元のオプションの仕様に従う。
+引数の定義を複製せず、内蔵した `main(argv)` を呼ぶ。`yourself --fo<Tab>` / `yourself --format <Tab>` の補完も内蔵版の引数定義から生成する。
+
+シェルへ読み込まず、保存したファイルを使う場合：
+
+```sh
+python3 "$OLNM_PY" yourself --minimal --format json
+python3 "$OLNM_PY" run yourself --minimal --format json
+uv run --no-project "$OLNM_PY" yourself --minimal --format json
+```
+
+uv tool 登録後は `command olnm yourself --minimal --format json`。
+eval 後は `olnm yourself --minimal --format json` / `olnm run yourself --minimal --format json` でもよい。
+Node/Bunからは既存の subprocess の argv を `[OLNM_PY, "yourself", "--minimal", "--format", "json"]` にすれば同じ入口を使える。
+mise / Node / Bun がない環境でも Python 3.11+ だけで利用できる。
+
+Python から直接呼ぶと、JSONなどの出力はそのまま stdout に出て、戻り値は終了コードとなる。
+
+```sh
+python3 -c 'import olnm, sys; sys.exit(olnm.yourself("--minimal", "--format", "json"))'
+```
+
+`--help` は終了0、不正な引数は終了2。機械処理する場合は上の直接CLI/APIを使い、子の出力と戻り値JSONが混じる `call yourself` は使わない。
+
+### 同梱版の根拠と更新（保守者向け）
+
+実行時は固定した版を使う。取得元・完全コミットSHA・元ファイルのSHA256・MITライセンス本文を olnm.py に保存している。
+通常の利用者が更新や登録の手順を行う必要はなく、olnm本体の更新とともに採用版が更新される。
+
+保守者が最新 main を採用する場合は、確認済みのクリーンな yourself clone を用意して以下を実行する。
+この更新スクリプトは通信せず、clone の HEAD と yourself.py / LICENSE のバイト一致を検査して取り込む。
+
+```sh
+python3 scripts/update_yourself.py /絶対パス/yourself
+OLNM_TEST_UV=1 python3 -m unittest discover -s tests -v
+```
+
+取り込み前に upstream 側でも `uv run pytest -q` を実行する。採用SHA、ハッシュ、テスト結果と生成差分をレビューする。
+未コミットで変更したソースは拒否し、同じ版の再取り込みでは差分を作らない。
 
 ## Python のワンライナーから使う
 
@@ -431,6 +489,7 @@ run は呼び出し元の cwd を引き継ぐ。
 | complete | `python3 "$OLNM_PY" complete -- olnm hub install --flavor ""`（候補を改行区切りで表示） |
 | tools | `python3 "$OLNM_PY" tools` / `tools mise` / `tools node` / `tools bun` / `tools go` / `tools rust`（存在確認と導入案内のみ） |
 | mise | `python3 "$OLNM_PY" mise exec node@26 -- node -v`（argv を mise へ転送） |
+| yourself | `python3 "$OLNM_PY" yourself --minimal --format json`（登録不要の同梱版） |
 | dial | `python3 "$OLNM_PY" dial` / `dial 0`（設定変更） |
 | run | `python3 "$OLNM_PY" run pycalc '2**10'` |
 | call | `python3 "$OLNM_PY" call like '["uvtets"]' --kwargs '{"n":2}'` |
@@ -851,7 +910,7 @@ python3 -m unittest discover -s tests -v
 ```
 
 forge 本体の代わりに tests/fake_forgejo.py で CLI / REST を代行し、dial・Git remote・Issue・PR・mirror 登録を確認する。
-実際の forge 取得、外部サービスへの push、全 241 関数の副作用を伴う実行はこのテストでは行わない。
+実際の forge 取得、外部サービスへの push、全 242 関数の副作用を伴う実行はこのテストでは行わない。
 全関数の定義・名前の一意性、全 CLI 階層のヘルプ、代表例の実出力・終了コードを確認する。
 Python ワンライナー、JSON、stdin、空白やシェル特殊文字を含むパス、uv の導入経路も確認する。
 追加の入力支援テストは bash / zsh の補完登録と候補、疑似端末での式入力と Tab、タイポ候補、不正JSON、Node/Bun不在時の案内を確認する。zsh / readline がない環境では該当ケースのみ skip。
@@ -922,6 +981,7 @@ Path の戻り値は CLI call で JSON 文字列、戻り値なしは null と�
 | `public() -> list[str]` | `print(olnm.public())` | `public` | Names callable through `call`. |
 | `read_dial(default: int = 3) -> int` | `print(olnm.read_dial())` | `read_dial` | Current dial (0..3); unset = 3 (plain online box). |
 | `run(name: str, *args: str) -> int` | `raise SystemExit(olnm.run("pycalc", "6*7"))` | run サブコマンドを使う | Run one one-liner in a non-interactive bash (for Node / Bun / Python callers). |
+| `yourself(*args: str) -> int` | `raise SystemExit(olnm.yourself("--minimal", "--format", "json"))` | yourself サブコマンドを使う | 登録・ダウンロード不要の同梱版 main(argv)。戻り値は終了コード。 |
 | `sections() -> list[str]` | `olnm.sections()` | `sections` | Section names in file order. |
 <!-- python-api:end -->
 
@@ -975,6 +1035,7 @@ Path の戻り値は CLI call で JSON 文字列、戻り値なしは null と�
 | `pyv` | 🐍 python version + path |
 | `pyhttp` | 🌐 serve current dir over http (pyhttp [port=8000]) |
 | `pyjson` | 📐 pretty-print json from file or stdin |
+| `yourself` | 🧾 bundled standard-library environment report; no separate file or registration |
 | `pycalc` | 🧮 evaluate math expression (pycalc '2**10') |
 | `pyimp` | 📥 check if module is importable and where (pyimp numpy) |
 | `pymods` | 📦 list top-level importable third-party modules |
