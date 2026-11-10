@@ -49,7 +49,9 @@ class TestReadmeInvocation(IsolatedInvocation):
         commands = [
             line for block in re.findall(r"```sh\n(.*?)\n```", readme, re.S)
             for line in block.splitlines()
-            if line.startswith("python3 -c ") and "hub_issue_new" not in line
+            # mise examples need an installed executable and may install runtimes;
+            # test_mise exercises their exact README text with an isolated fake.
+            if line.startswith("python3 -c ") and "hub_issue_new" not in line and "olnm.mise(" not in line
         ]
         self.assertGreaterEqual(len(commands), 10)
         for command in commands:
@@ -114,6 +116,10 @@ class TestReadmeInvocation(IsolatedInvocation):
                         yield from visit(child, (*prefix, name))
 
         for path in visit(olnm.build_parser()):
+            # External single-file tools bootstrap through uv. Their exact argv
+            # and help paths are covered by test_stdlib_commands and install checks.
+            if path[:1] and path[0] in olnm._STDLIB_TOOLS:
+                continue
             with self.subTest(path=path):
                 self.assertIn("usage:", self.cli(*path, "--help").stdout)
 

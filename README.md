@@ -1,6 +1,6 @@
 # 🧷 OneLinearNumerousMemo (olnm)
 
-bash/zsh 用の **233 個のシェル関数**と、ローカル GitHub（Gitea / Forgejo）を扱う **32 個の Python API**。
+bash/zsh 用の **247 個のシェル関数**と、ローカル GitHub（Gitea / Forgejo）を扱う **42 個の Python API**。
 実装は `olnm.py` 1 ファイル、実行時の Python 外部依存はゼロ。
 Python 3.11 以降、Linux（Ubuntu / WSL の Ubuntu）の bash/zsh を対象とする。
 macOS では GNU コマンドとの差異があり、PowerShell/cmd からシェル関数を使う場合は WSL 内で実行する。
@@ -11,6 +11,8 @@ Node / Bun / gh / Docker / fzf などは、それを使う関数を実行する�
 - [最初の成功まで](#最初の成功まで)
 - [呼び出し方の選び方](#呼び出し方の選び方)
 - [bash/zsh に関数を登録する](#bashzsh-に関数を登録する)
+- [標準ライブラリツールのデフォルトコマンド](#標準ライブラリツールのデフォルトコマンド)
+- [yourself：登録なしの環境レポート](#yourself登録なしの環境レポート)
 - [Python のワンライナーから使う](#python-のワンライナーから使う)
 - [JSON で関数を呼ぶ call](#json-で関数を呼ぶ-call)
 - [uv：ファイルを実行する](#uvファイルを実行する)
@@ -21,6 +23,10 @@ Node / Bun / gh / Docker / fzf などは、それを使う関数を実行する�
 - [ダイヤルと保存先](#ダイヤルと保存先)
 - [hub の導入から Issue・PR 作成まで](#hub-の導入から-issuepr-作成まで)
 - [Node / Bun から呼ぶ](#node--bun-から呼ぶ)
+- [入力支援：Tab・タイポ・引用符なしの計算](#入力支援tabタイポ引用符なしの計算)
+- [mise：複数言語の共通入口](#mise複数言語の共通入口)
+- [Node・Bun・Rust と作業ディレクトリ](#nodebunrust-と作業ディレクトリ)
+- [olnm 自体の更新](#olnm-自体の更新)
 - [困ったとき](#困ったとき)
 - [検証範囲と再実行](#検証範囲と再実行)
 - [Python API 全件](#python-api-全件)
@@ -119,6 +125,117 @@ source "$HOME/.local/share/olnm/olnm.sh"
 
 一覧・ダイヤル・hub などは引き続き `olnm.py` と python3 を呼ぶ。
 `olnm.sh` だけ持ち込めば全機能が Python 不要になるわけではない。
+
+## 標準ライブラリツールのデフォルトコマンド
+
+olnm を eval で読み込むと、追加の登録なしで次のコマンドを使える。
+
+```sh
+xprobe --help
+cli_args --help
+ghi --help
+printf '# Hello\n' | markdown to-html
+ascii_artist --help
+yourself --minimal --format json
+```
+
+| コマンド | 供給元・実装 | 実行方法 |
+|---|---|---|
+| yourself | yourself.py の固定スナップショット | olnm.py に同梱。Pythonだけで実行 |
+| xprobe | myon-bioinformatics/xprobe | uv の専用ツール環境をキャッシュして再利用 |
+| cli_args | myon-bioinformatics/cli_args | 同上 |
+| ghi | myon-bioinformatics/gh_identity | 同上。供給元は ghi / gh_identity を提供 |
+| markdown | myon-bioinformatics/markdown の md-market | 同上。inventory / to-html / to-markdown / toc |
+| ascii_artist | myon-bioinformatics/ascii_artist | 同上 |
+
+追加の単一ファイル群をolnm.pyへ重複コピーせず、各リポジトリの最小限の配布設定を利用する。
+供給元の実行時Python依存は空。ビルドバックエンドと開発用依存は実行時依存と区別する。
+uvが必要な入口は初回に固定したGitコミットを取得・ビルドするため通信する場合があり、その後はuvのキャッシュを再利用する。
+**利用者が uv tool install や名前の登録を先に行う必要はない。** uv不在なら公式導入先を示して終了127となる。
+
+CLI・Python・uv・Node/Bunから同じ入口を呼べる。
+
+```sh
+python3 "$OLNM_PY" xprobe --help
+python3 "$OLNM_PY" run xprobe --help
+uv run --no-project "$OLNM_PY" xprobe --help
+```
+
+```python
+import olnm
+raise SystemExit(olnm.xprobe('--help'))
+# olnm.cli_args / olnm.ghi / olnm.markdown / olnm.ascii_artist も同じ argv・終了コードの契約
+```
+
+Node/Bun側のargv配列も `[OLNM_PY, 'xprobe', '--help']` のようにするだけ。
+stdout / stderr / stdin / cwd / 終了コードは供給元へ引き継ぎ、シェル文字列として再解釈しない。
+`call xprobe` 等では実行出力と戻り値JSONが混じるため、直接CLI/APIを使う。
+
+olnm の dial 0/1 では uv に `--offline` を付け、取得済みキャッシュだけを使用する。未取得のツールは失敗する。
+uvのoffline指定は子ツールの通信を遮断しない。ghiのAPI操作等は供給元の仕様に従う。
+採用コミットは `_STDLIB_TOOLS` に完全SHAで固定し、olnm更新時に検証済みの版へ更新する。
+供給元6リポジトリのuv配布PRはmainへ統合済み。検証したmainの完全SHAを採用し、更新時にも取得・実行テストを行う。
+
+olnmを介さず常用コマンドとして登録したい場合は、各リポジトリで `uv tool install .`。
+別プロジェクトからimportする場合は `uv add /絶対パス/リポジトリ` を使う。
+設定は build-system・既存モジュール・console script を中心とした最小限とし、実行時依存は増やさない。
+
+## yourself：登録なしの環境レポート
+
+**olnm を読み込めば `yourself` と打つだけで利用できる。**
+標準ライブラリだけで動く [yourself.py](https://github.com/myon-bioinformatics/yourself) を、変更せず olnm.py の中に同梱している。
+追加のインストール・登録・ファイル配置・実行時ダウンロードは不要。olnm.py だけを別の場所へ持ち込んでも使える。
+Python の組み込み標準モジュールという意味ではなく、外部Python依存が不要なモジュールである。
+
+bash/zsh に定義を eval 済みなら：
+
+```sh
+yourself
+yourself --minimal --format json
+yourself --help
+```
+
+引数なしでは元の yourself と同じ、現在の作業ディレクトリを対象とする環境レポートになる。
+最小JSONだけなら `--minimal --format json`。出力内容は実行環境によって変わり、最小JSONには schema_version / os / runtime が含まれる。
+`--versions` / `--reach` など元のオプションもそのまま受け取る。観測の範囲・通信・実行の有無は元のオプションの仕様に従う。
+引数の定義を複製せず、内蔵した `main(argv)` を呼ぶ。`yourself --fo<Tab>` / `yourself --format <Tab>` の補完も内蔵版の引数定義から生成する。
+
+シェルへ読み込まず、保存したファイルを使う場合：
+
+```sh
+python3 "$OLNM_PY" yourself --minimal --format json
+python3 "$OLNM_PY" run yourself --minimal --format json
+uv run --no-project "$OLNM_PY" yourself --minimal --format json
+```
+
+uv tool 登録後は `command olnm yourself --minimal --format json`。
+eval 後は `olnm yourself --minimal --format json` / `olnm run yourself --minimal --format json` でもよい。
+Node/Bunからは既存の subprocess の argv を `[OLNM_PY, "yourself", "--minimal", "--format", "json"]` にすれば同じ入口を使える。
+mise / Node / Bun がない環境でも Python 3.11+ だけで利用できる。
+
+Python から直接呼ぶと、JSONなどの出力はそのまま stdout に出て、戻り値は終了コードとなる。
+
+```sh
+python3 -c 'import olnm, sys; sys.exit(olnm.yourself("--minimal", "--format", "json"))'
+```
+
+`--help` は終了0、不正な引数は終了2。機械処理する場合は上の直接CLI/APIを使い、子の出力と戻り値JSONが混じる `call yourself` は使わない。
+
+### 同梱版の根拠と更新（保守者向け）
+
+実行時は固定した版を使う。取得元・完全コミットSHA・元ファイルのSHA256・MITライセンス本文を olnm.py に保存している。
+通常の利用者が更新や登録の手順を行う必要はなく、olnm本体の更新とともに採用版が更新される。
+
+保守者が最新 main を採用する場合は、確認済みのクリーンな yourself clone を用意して以下を実行する。
+この更新スクリプトは通信せず、clone の HEAD と yourself.py / LICENSE のバイト一致を検査して取り込む。
+
+```sh
+python3 scripts/update_yourself.py /絶対パス/yourself
+OLNM_TEST_UV=1 python3 -m unittest discover -s tests -v
+```
+
+取り込み前に upstream 側でも `uv run pytest -q` を実行する。採用SHA、ハッシュ、テスト結果と生成差分をレビューする。
+未コミットで変更したソースは拒否し、同じ版の再取り込みでは差分を作らない。
 
 ## Python のワンライナーから使う
 
@@ -296,7 +413,7 @@ pycalc '6*7'
 olnm python
 ```
 
-ここから `olnm` は一覧用の**シェル関数**になる。CLI は `command olnm` で呼ぶ。
+ここから `olnm` は**シェル関数**になる。従来の `olnm python` など分類名1語は一覧表示を保ち、`olnm run ...` / `olnm calc` / `olnm tools` などの CLI も呼べる。分類名と衝突する場合を含め、インストール済み CLI を確実に呼ぶには `command olnm`。
 
 ```sh
 command olnm run pycalc '6*7'
@@ -423,6 +540,11 @@ run は呼び出し元の cwd を引き継ぐ。
 | sections | `python3 "$OLNM_PY" sections` |
 | net | `python3 "$OLNM_PY" net`（🌍 の関数名） |
 | doctor | `python3 "$OLNM_PY" doctor`（任意ツールの欠如も表示） |
+| calc | `python3 "$OLNM_PY" calc`（式を対話入力）、`calc 6 + 7`、stdin からも入力可 |
+| complete | `python3 "$OLNM_PY" complete -- olnm hub install --flavor ""`（候補を改行区切りで表示） |
+| tools | `python3 "$OLNM_PY" tools` / `tools mise` / `tools node` / `tools bun` / `tools go` / `tools rust`（存在確認と導入案内のみ） |
+| mise | `python3 "$OLNM_PY" mise exec node@26 -- node -v`（argv を mise へ転送） |
+| yourself | `python3 "$OLNM_PY" yourself --minimal --format json`（登録不要の同梱版） |
 | dial | `python3 "$OLNM_PY" dial` / `dial 0`（設定変更） |
 | run | `python3 "$OLNM_PY" run pycalc '2**10'` |
 | call | `python3 "$OLNM_PY" call like '["uvtets"]' --kwargs '{"n":2}'` |
@@ -610,6 +732,209 @@ node -e 'const {execFileSync}=require("node:child_process"); const rows=JSON.par
 ツール方式なら `execFileSync("olnm", ["run", "pycalc", "6*7"], ...)`。
 uv 経由なら `execFileSync("uv", ["run", "--no-project", process.env.OLNM_PY, "run", "pycalc", "6*7"], ...)`。
 
+## 入力支援：Tab・タイポ・引用符なしの計算
+
+bash/zsh へ最新の定義を読み込む。zsh は先に `autoload -Uz compinit; compinit` を実行する。
+ファイル方式なら `eval "$(python3 "$OLNM_PY" init bash)"`（zsh は bash を zsh に変更）。
+ツール方式なら `eval "$(command olnm init bash)"`。
+
+入力途中で Tab を押す（以下の `<Tab>` は入力文字ではなくキー操作）。
+
+| 入力位置 | 候補 |
+|---|---|
+| `olnm ru<Tab>` | `run` |
+| `olnm run pyc<Tab>` | `pycalc` / `pyclean` / `pycsv` |
+| `olnm ls py<Tab>` | `python` |
+| `hubdial issue <Tab>` | `ls` / `new` |
+| `hubdial install --flavor <Tab>` | `forgejo` / `gitea` |
+| `olnm hub issue ls --st<Tab>` | `--state` |
+| `olnm_dial <Tab>` | `0` / `1` / `2` / `3` |
+| `olnm call read_<Tab>` | `read_dial` |
+| `olnm tools ru<Tab>` | `rust` / `rustc` / `rustup` |
+
+候補は CLI の引数定義と関数一覧から生成する。補完のためにサービスへ接続したり、コマンドを実行したりしない。
+ファイル名など自由入力部分は bash の標準補完へ委ねる。zsh では登録したコマンド／選択値を補完する。
+`python3 olnm.py ...` 自体の Python コマンド補完は登録しない。ファイル方式でも eval 後の `olnm ...` を使う。
+
+`olnm rn` / `olnm hub isue` などで近い候補を表示し、実行は失敗で終了する。勝手に別の操作へ補正・実行しない。
+分類名一覧に該当しない `olnm rn` もコマンド名と分類名の候補を案内し、終了2になる。分類名の入力ミスも同様。CLI 単独の利用は `command olnm rn` または `python3 "$OLNM_PY" rn`。
+既存の未定義シェル関数に対する `uvtets` → `uvtest` の誘導も維持する。
+JSON call の構文誤りは、配列／オブジェクトの指定例を表示して終了2となる。
+
+### 式はプロンプトで入力すれば引用符不要
+
+```sh
+python3 "$OLNM_PY" calc
+```
+
+プロンプトが出たら、次の式だけを入力して Enter（シェルへ直接貼る行ではない）。
+
+```text
+(6+7)*2
+```
+
+期待値は `26`。`*` や括弧をシェルが解釈しないため、外側の引用符は不要。
+eval 後なら `olnm calc` または引数なしの `pycalc` でも同じ入力モードへ入る。
+readline が利用できれば、プロンプト内の `sq<Tab>` が `sqrt(` に補完され、矢印キーで編集できる。
+readline は任意の標準ライブラリ機能で、ない場合も通常の入力はできる。
+
+一行で使うときのシェル規則は変わらない。`calc 6 + 7` は `13`、乗算や括弧を含める場合は引用する。
+Python から argv 配列や API で呼ぶ場合、式文字列の中にシェル用の引用符を付ける必要はない。
+
+```sh
+python3 "$OLNM_PY" calc '(6+7)*2'
+printf '%s\n' '(6+7)*2' | python3 "$OLNM_PY" calc
+```
+
+新しい calc は四則演算・`// % **`、`pi/e/tau`、`sqrt/sin/cos/tan/log/log2/log10/exp/ceil/floor/abs/round/min/max` に限定する。
+文・import・属性参照・文字列は受け付けず、式長1000字・構文128ノード・整数4096bit・指数絶対値1000まで。
+計算式の誤りは理由と再入力例を stderr に示して終了2。既存の引数あり `pycalc '...'` は互換性のため従来の Python 式評価を保ち、信頼できる式だけに使う。
+
+## mise：複数言語の共通入口
+
+Python の環境・依存は uv に任せ、Node/Bun/Go などの本体は mise でまとめて管理できる。
+olnm は薄い呼び出し口として、mise の引数・設定・ロック形式をそのまま使う。各言語のパッケージ管理は引き続き uv / npm・Bun / Go modules が担当する。
+mise のインストール自体は [公式手順](https://mise.jdx.dev/getting-started.html)で一度だけ行う。
+`python3 "$OLNM_PY" tools mise` でも PATH の有無と導入先を確認できる。
+olnm が mise や Node/Bun/Go を勝手にインストールすることはない。
+
+### シェル関数から使う
+
+最新定義を eval で読み込んでから使う。通常は個人共通のバージョンを一度設定し、プロジェクトごとの差があるときだけ上書きする。
+以下の use / global / install は実際に導入・設定変更を行う操作なので、使うものだけを選んで実行する。
+
+| olnm 関数 | mise に渡す操作 | 用途 |
+|---|---|---|
+| `miseglobal node@26 bun@latest go@latest` | `mise use --global ...` | 個人共通の本体を導入して既定値にする |
+| `miseuse node@26` | `mise use ...` | 作業ディレクトリの mise.toml へ記録して導入 |
+| `miseinstall` | `mise install` | 既存設定に従って本体を導入 |
+| `miseexec -- node --version` | `mise exec -- ...` | 設定を適用した子プロセスを起動 |
+| `miseexec node@26 -- node --version` | `mise exec node@26 -- ...` | 設定を書き換えず、その実行だけ版を指定 |
+| `miseoffline -- node --version` | 自動導入を無効にした `mise exec` | 導入済み環境で実行 |
+| `misels` | `mise ls` | バージョンと設定元を確認 |
+| `miselock` | `mise lock` | 正確なバージョン・チェックサム等をロック |
+| `misedoctor` | `mise doctor` | mise の設定を診断 |
+
+`miseexec` はシェルを activate しなくても利用でき、親シェルの PATH は変更しない。
+`miseglobal` / `miseuse` の後も、実行は `miseexec -- ...` にすれば現在のシェルへ即時に反映されるかどうかを気にせず使える。
+`miseuse` の `--pin` など、mise の追加オプションはそのまま渡る。ロックの機能・対応範囲は導入した mise のバージョンにも依存する。
+`miseexec` 等のツール指定位置は node@26 / bun@latest / go@latest / uv@latest の候補を Tab で表示する。他のツールもそのまま入力できる。
+
+```sh
+miseexec node@26 -- node --version
+miseexec bun@latest -- bun --version
+miseexec go@latest -- go version
+miseexec -- uv run --locked python -c 'print(6*7)'
+```
+
+**`mise exec` は設定に従って不足したツールを自動導入する場合がある。**
+初回の版情報取得がタイムアウトし、警告後に PATH 上の別バージョンが実行される場合も実測した。
+初回は `miseinstall node@26` → `miseexec node@26 -- node --version` の順で、導入成功と表示された実バージョンを確認する。
+ラッパーは mise の警告を stderr に保ち、終了0だけを要求バージョンの確認結果にはしない。
+`miseoffline` は `MISE_AUTO_INSTALL=false` と `MISE_EXEC_AUTO_INSTALL=false` を子プロセスに設定する。
+これは完全なネットワーク遮断ではない。実行したコマンド・設定内の処理・バックエンドの通信まで止めるものではない。
+🌍 の付いたラッパーは従来の dial 0/1 では停止し、miseoffline / misels / misedoctor は利用できる。
+Python API と後述の `olnm mise` は任意の mise コマンドを明示的に呼ぶ入口で、olnm の dial を適用せず mise 自体の設定に従う。
+
+### Python / uv / Node から同じ処理を呼ぶ
+
+ファイルを保存してあれば、シェル関数の登録なしで呼べる。
+
+```sh
+python3 "$OLNM_PY" mise exec node@26 -- node --version
+uv run --no-project "$OLNM_PY" mise exec node@26 -- node --version
+```
+
+uv tool 登録後なら `command olnm mise exec node@26 -- node --version`。
+eval 後の `olnm mise` 1語は mise 分類の一覧、`olnm mise exec ...` は mise への呼び出しになる。
+
+`olnm.py` を import 可能な場所へ置くか、利用側へ依存登録した Python 環境では：
+
+```sh
+python3 -c 'import olnm, sys; sys.exit(olnm.mise("exec", "node@26", "--", "node", "--version"))'
+```
+
+uv プロジェクトなら `uv run python -c ...` として同じ API を呼べる。
+`olnm.mise()` は bash を経由せず argv リストで起動し、呼出し元の cwd・stdin・stdout・stderr・終了コードを引き継ぐ。
+JSON が必要なデータ API ではないため、子出力が混じる `call mise` は使わず、CLI または Python API を使う。
+ファイル方式と uv tool 方式の import 環境の違いは既存の説明と同じ。
+
+Node 側もシェル文字列を組み立てず argv 配列で呼ぶ。以下を `invoke-olnm.cjs` として保存すると、Node/Bun のどちらからも呼べる。
+
+```js
+const { spawnSync } = require('node:child_process');
+const result = spawnSync('python3', [
+  process.env.OLNM_PY, 'mise', 'exec', 'node@26', '--', 'node', '--version'
+], { stdio: 'inherit' });
+if (result.error) { console.error(result.error.message); process.exit(127); }
+process.exit(result.status ?? 1);
+```
+
+```sh
+node invoke-olnm.cjs
+bun invoke-olnm.cjs
+```
+
+Node/Bun 自体がまだない場合は、最初の一回を上記の Python/uv の入口から呼ぶ。
+`--` 以降は実行するコマンドの引数として保ち、空白・引用符・日本語も argv の要素単位で渡す。
+mise 不在時は公式導入先と次の操作を stderr に示し、終了127。勝手なシェル設定の変更はしない。
+
+公式: [exec](https://mise.jdx.dev/cli/exec) / [use](https://mise.jdx.dev/cli/use.html) / [自動導入の設定](https://mise.jdx.dev/configuration/settings.html) / [lock](https://mise.jdx.dev/cli/lock)。
+
+## Node・Bun・Rust と作業ディレクトリ
+
+Ubuntu / WSL にこれらが初めから入っているとは限らない。Windows 側へ入れたものと WSL 側の Linux 版も別に確認する。
+olnm の一覧・Python 関数・Python計算には Node/Bun/Rust は不要。それぞれを利用する関数だけで必要になる。
+
+```sh
+python3 "$OLNM_PY" tools
+python3 "$OLNM_PY" tools node
+python3 "$OLNM_PY" tools bun
+python3 "$OLNM_PY" tools rust
+command -v node npm npx bun rustc cargo rustup
+```
+
+`tools` は PATH 上の有無・見つかったパス・公式の導入先・作業フォルダの扱いを表示する。自動インストールや設定変更はしない。
+Node/Bun 関数の呼び出し時にも、不足した実行環境を確認して具体的な案内を表示し、終了127となる。
+例: `run ncalc '6*7'` に Node がなければ Node の案内。`run bi` に Bun がなければ Bun の案内。
+呼ぶたびに確認するため、同じターミナルの PATH に追加した後は定義の再読み込みは不要。
+`nclean` は npm 不在時に node_modules やロックを消さず停止する。
+
+| 層 | Node | Bun | Rust |
+|---|---|---|---|
+| ユーザーごとの本体 | nvm 等で Node 26 を導入。npm/npx も確認 | 公式手順で導入。通常 ~/.bun/bin を PATH に追加 | rustup で導入。通常 ~/.cargo/bin を PATH に追加 |
+| 作業フォルダの指定 | .nvmrc に26を記録、nvm use | 使用する Bun のバージョンを README / CI に記録 | rust-toolchain.toml で採用ツールチェーンを指定 |
+| そのプロジェクトの依存・生成物 | package.json / lock / node_modules | package.json / bun.lock / node_modules | Cargo.toml / Cargo.lock / target |
+
+nvm 導入済みなら、Ubuntu/WSL 内で次を実行する（新しい `.nvmrc` を用意する例。既存の指定は先に確認）。
+
+```sh
+nvm install 26
+nvm use 26
+printf '%s\n' 26 > .nvmrc
+```
+
+`npm install` は Node 本体、`bun install` は Bun 本体をインストールするコマンドではない。
+uv の Python 環境に Node/Bun/Rust が自動で含まれるわけでもない。配布済みバイナリの uv/Bun を使うだけなら、Rust コンパイラの追加は不要。
+必要なものだけ導入し、プロジェクトではバージョンと依存を固定する。
+
+公式: [Node](https://nodejs.org/en/download) / [nvm](https://github.com/nvm-sh/nvm) / [Bun](https://bun.sh/docs/installation) / [Rust](https://rust-lang.org/tools/install)。
+
+## olnm 自体の更新
+
+| 導入方法 | 実行する場所 | 更新と再読み込み |
+|---|---|---|
+| 手動保存した olnm.py | 保存ファイルへ書ける場所。cwd 不問 | OLNM_URL を確認した raw URL に設定 → olnm_update。新ファイルの help が通った場合のみ置換して reload |
+| uv tool + Git の @main | cwd 不問 | uv tool upgrade one-linear-numerous-memo → eval "$(command olnm init bash)" |
+| uv tool + ローカル clone | その clone | git pull --ff-only → uv tool install --force . → init を再度 eval |
+| SHA 固定の uv tool | cwd 不問 | uv tool install --force 'git+https://github.com/myon-bioinformatics/OneLinearNumerousMemo.git@新SHA' → init を再度 eval |
+| uv add の利用側 | 利用側の pyproject.toml / uv.lock のある場所 | uv lock --upgrade-package one-linear-numerous-memo → uv sync → テスト |
+
+`olnm_update` の対象は手動保存ファイル。uv 管理の site-packages や Git checkout をこの関数で書き換えず、導入方法に対応する手段を使う。
+`main` 参照でも uv.lock がある通常実行はロック済みコミットを使う。更新後の SHA と挙動を確認し、lock をコミットする。
+シェルへ読み込んだ関数は古い定義が残るため、本体更新後に init を再度 eval する。zsh は init zsh。
+`olnm_update` の URL 未設定時もファイル方式／uv tool 方式の次の操作を表示する。
+
 ## 困ったとき
 
 | 症状 | 確認・対処 |
@@ -619,7 +944,7 @@ uv 経由なら `execFileSync("uv", ["run", "--no-project", process.env.OLNM_PY,
 | ModuleNotFoundError: olnm | cwd に olnm.py があるか確認。別 cwd は uv add または sys.path / runpy 方式 |
 | uv tool install olnm.py が失敗 | pyproject.toml を含むディレクトリ／Git URL を指定。単一ファイルは uv run |
 | olnm が見つからない | ツール方式は uv tool list / uv tool update-shell。シェル方式はそのターミナルで eval |
-| olnm run ... で no section | 読込済みの関数が CLI を隠している。`command olnm run ...` |
+| olnm run ... で no section | 古いシェル定義なら再度 init を eval。インストール済み CLI は `command olnm run ...` |
 | pycalc が見つからない | eval 未実行なら `python3 "$OLNM_PY" run pycalc '6*7'` |
 | call pycalc が失敗 | シェル関数は run。Python API は call public で確認 |
 | JSON parse error | 配列／オブジェクトをシングルクォートで囲む。true は小文字。stderr を stdout に結合しない |
@@ -636,13 +961,14 @@ uv 経由なら `execFileSync("uv", ["run", "--no-project", process.env.OLNM_PY,
 リポジトリルートで：
 
 ```sh
-python3 -m unittest discover -v
+python3 -m unittest discover -s tests -v
 ```
 
 forge 本体の代わりに tests/fake_forgejo.py で CLI / REST を代行し、dial・Git remote・Issue・PR・mirror 登録を確認する。
-実際の forge 取得、外部サービスへの push、全 233 関数の副作用を伴う実行はこのテストでは行わない。
+実際の forge 取得、外部サービスへの push、全 247 関数の副作用を伴う実行はこのテストでは行わない。
 全関数の定義・名前の一意性、全 CLI 階層のヘルプ、代表例の実出力・終了コードを確認する。
-Python ワンライナー、JSON、stdin、空白を含むパス、uv の導入経路も確認する。
+Python ワンライナー、JSON、stdin、空白やシェル特殊文字を含むパス、uv の導入経路も確認する。
+追加の入力支援テストは bash / zsh の補完登録と候補、疑似端末での式入力と Tab、タイポ候補、不正JSON、Node/Bun不在時の案内を確認する。zsh / readline がない環境では該当ケースのみ skip。
 
 uv の install / uvx / uv add / 再インストール / uninstall を実際に試す場合：
 
@@ -675,6 +1001,9 @@ Path の戻り値は CLI call で JSON 文字列、戻り値なしは null と�
 <!-- python-api:start -->
 | Python 署名 | Python ワンライナーの中身 | call に続ける引数 | 処理 |
 |---|---|---|---|
+| `calc(expression: str) -> int \| float` | `print(olnm.calc("sqrt(81)*2"))` | `calc '["sqrt(81)*2"]'` | 制限付きの算術評価。対話入力は CLI calc を使う。 |
+| `complete(*words: str) -> list[str]` | `olnm.complete("olnm", "run", "pyc")` | `complete '["olnm","run","pyc"]'` | コマンド名と現在語を含む候補。表示と戻り値。 |
+| `tools(name: str \| None = None) -> dict` | `olnm.tools("node")` | `tools '["node"]'` | PATH と導入案内。インストールは行わない。 |
 | `dial(level: int \| None = None) -> int` | `olnm.dial()` | `dial` | Show or set the dial. When the local forge exists, also start/stop it and re-point every repo's origin. |
 | `doctor() -> dict` | `olnm.doctor()` | `doctor` | Optional tools on PATH, the dial, and the forge if set up. |
 | `entries() -> list[dict]` | `print(olnm.entries())` | `entries` | Every help line: section, emoji, name, description, needs-internet flag. |
@@ -701,11 +1030,18 @@ Path の戻り値は CLI call で JSON 文字列、戻り値なしは null と�
 | `init(shell: str \| None = None) -> str` | `olnm.init("bash")` | `init '["bash"]'` | Shell code to eval: functions + dial stubs + typo hook + completion. |
 | `like(word: str, hint: bool = False, n: int = 6) -> list[str]` | `olnm.like("uvtets", n=2)` | `like '["uvtets"]' --kwargs '{"n":2}'` | Closest names: substring hits first, then difflib similarity ≥0.5. |
 | `ls(section: str \| None = None, offline: bool = False) -> list[dict]` | `olnm.ls("python", offline=True)` | `ls '["python"]' --kwargs '{"offline":true}'` | Print help lines, optionally one section and/or offline-only. |
+| `mise(*args: str) -> int` | `raise SystemExit(olnm.mise("exec", "--", "node", "--version"))` | mise サブコマンドを使う | argv・入出力・終了コードを引き継ぐ直接呼び出し。 |
 | `names() -> list[str]` | `print(olnm.names())` | `names` | All function names (help lines only, private helpers excluded). |
 | `net() -> list[str]` | `olnm.net()` | `net` | Names that need internet (🌍). |
 | `public() -> list[str]` | `print(olnm.public())` | `public` | Names callable through `call`. |
 | `read_dial(default: int = 3) -> int` | `print(olnm.read_dial())` | `read_dial` | Current dial (0..3); unset = 3 (plain online box). |
 | `run(name: str, *args: str) -> int` | `raise SystemExit(olnm.run("pycalc", "6*7"))` | run サブコマンドを使う | Run one one-liner in a non-interactive bash (for Node / Bun / Python callers). |
+| `xprobe(*args: str) -> int` | `raise SystemExit(olnm.xprobe("--help"))` | xprobe サブコマンドを使う | 固定コミットの単一ファイルツールをuvのキャッシュ経由で実行。 |
+| `cli_args(*args: str) -> int` | `raise SystemExit(olnm.cli_args("--help"))` | cli_args サブコマンドを使う | 固定コミットの単一ファイルツールをuvのキャッシュ経由で実行。 |
+| `ghi(*args: str) -> int` | `raise SystemExit(olnm.ghi("--help"))` | ghi サブコマンドを使う | 固定コミットの単一ファイルツールをuvのキャッシュ経由で実行。 |
+| `markdown(*args: str) -> int` | `raise SystemExit(olnm.markdown("--help"))` | markdown サブコマンドを使う | 固定コミットの単一ファイルツールをuvのキャッシュ経由で実行。 |
+| `ascii_artist(*args: str) -> int` | `raise SystemExit(olnm.ascii_artist("--help"))` | ascii_artist サブコマンドを使う | 固定コミットの単一ファイルツールをuvのキャッシュ経由で実行。 |
+| `yourself(*args: str) -> int` | `raise SystemExit(olnm.yourself("--minimal", "--format", "json"))` | yourself サブコマンドを使う | 登録・ダウンロード不要の同梱版 main(argv)。戻り値は終了コード。 |
 | `sections() -> list[str]` | `olnm.sections()` | `sections` | Section names in file order. |
 <!-- python-api:end -->
 
@@ -759,6 +1095,12 @@ Path の戻り値は CLI call で JSON 文字列、戻り値なしは null と�
 | `pyv` | 🐍 python version + path |
 | `pyhttp` | 🌐 serve current dir over http (pyhttp [port=8000]) |
 | `pyjson` | 📐 pretty-print json from file or stdin |
+| `xprobe` | 📦 single-file xprobe via uv's cached, pinned tool environment |
+| `cli_args` | 📦 single-file CLI argument helpers via uv's cached tool environment |
+| `ghi` | 📦 single-file gh_identity CLI via uv's cached tool environment |
+| `markdown` | 📦 single-file Markdown stdio CLI via uv's cached tool environment |
+| `ascii_artist` | 📦 single-file ASCII CLI via uv's cached tool environment |
+| `yourself` | 🧾 bundled standard-library environment report; no separate file or registration |
 | `pycalc` | 🧮 evaluate math expression (pycalc '2**10') |
 | `pyimp` | 📥 check if module is importable and where (pyimp numpy) |
 | `pymods` | 📦 list top-level importable third-party modules |
@@ -1028,5 +1370,18 @@ Path の戻り値は CLI call で JSON 文字列、戻り値なしは null と�
 | `todo` | ✅ append todo (todo "x") / list open ones |
 | `done1` | ✅ mark todo line n done (done1 3) |
 | `jnl` | 📓 open today's journal ~/journal/YYYY-MM-DD.md |
+
+### mise
+
+| 関数 | 説明 |
+|---|---|
+| `miseuse` | ➕ 🌍 install tools and record project versions (miseuse node@26) |
+| `miseglobal` | 🌐 🌍 install tools and set personal defaults (miseglobal node@26 bun@latest go@latest) |
+| `miseinstall` | 📦 🌍 install configured or specified tools |
+| `miseexec` | ▶️ 🌍 run in mise environment, installing missing tools as mise settings allow (miseexec node@26 -- node -v) |
+| `miseoffline` | 🔌 run with automatic tool installation disabled; child command may still use network (miseoffline -- node -v) |
+| `misels` | 📋 list mise tool versions and configuration sources |
+| `miselock` | 🔒 🌍 create or refresh mise.lock versions, checksums and download URLs |
+| `misedoctor` | 🩺 diagnose mise installation and configuration |
 
 <!-- shell-catalog:end -->
