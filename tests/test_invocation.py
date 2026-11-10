@@ -49,7 +49,9 @@ class TestReadmeInvocation(IsolatedInvocation):
         commands = [
             line for block in re.findall(r"```sh\n(.*?)\n```", readme, re.S)
             for line in block.splitlines()
-            if line.startswith("python3 -c ") and "hub_issue_new" not in line
+            # mise examples need an installed executable and may install runtimes;
+            # test_mise exercises their exact README text with an isolated fake.
+            if line.startswith("python3 -c ") and "hub_issue_new" not in line and "olnm.mise(" not in line
         ]
         self.assertGreaterEqual(len(commands), 10)
         for command in commands:

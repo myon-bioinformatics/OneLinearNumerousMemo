@@ -1,6 +1,6 @@
 # 🧷 OneLinearNumerousMemo (olnm)
 
-bash/zsh 用の **233 個のシェル関数**と、ローカル GitHub（Gitea / Forgejo）を扱う **35 個の Python API**。
+bash/zsh 用の **241 個のシェル関数**と、ローカル GitHub（Gitea / Forgejo）を扱う **36 個の Python API**。
 実装は `olnm.py` 1 ファイル、実行時の Python 外部依存はゼロ。
 Python 3.11 以降、Linux（Ubuntu / WSL の Ubuntu）の bash/zsh を対象とする。
 macOS では GNU コマンドとの差異があり、PowerShell/cmd からシェル関数を使う場合は WSL 内で実行する。
@@ -22,6 +22,7 @@ Node / Bun / gh / Docker / fzf などは、それを使う関数を実行する�
 - [hub の導入から Issue・PR 作成まで](#hub-の導入から-issuepr-作成まで)
 - [Node / Bun から呼ぶ](#node--bun-から呼ぶ)
 - [入力支援：Tab・タイポ・引用符なしの計算](#入力支援tabタイポ引用符なしの計算)
+- [mise：複数言語の共通入口](#mise複数言語の共通入口)
 - [Node・Bun・Rust と作業ディレクトリ](#nodebunrust-と作業ディレクトリ)
 - [olnm 自体の更新](#olnm-自体の更新)
 - [困ったとき](#困ったとき)
@@ -428,7 +429,8 @@ run は呼び出し元の cwd を引き継ぐ。
 | doctor | `python3 "$OLNM_PY" doctor`（任意ツールの欠如も表示） |
 | calc | `python3 "$OLNM_PY" calc`（式を対話入力）、`calc 6 + 7`、stdin からも入力可 |
 | complete | `python3 "$OLNM_PY" complete -- olnm hub install --flavor ""`（候補を改行区切りで表示） |
-| tools | `python3 "$OLNM_PY" tools` / `tools node` / `tools bun` / `tools rust`（存在確認と導入案内のみ） |
+| tools | `python3 "$OLNM_PY" tools` / `tools mise` / `tools node` / `tools bun` / `tools go` / `tools rust`（存在確認と導入案内のみ） |
+| mise | `python3 "$OLNM_PY" mise exec node@26 -- node -v`（argv を mise へ転送） |
 | dial | `python3 "$OLNM_PY" dial` / `dial 0`（設定変更） |
 | run | `python3 "$OLNM_PY" run pycalc '2**10'` |
 | call | `python3 "$OLNM_PY" call like '["uvtets"]' --kwargs '{"n":2}'` |
@@ -674,6 +676,97 @@ printf '%s\n' '(6+7)*2' | python3 "$OLNM_PY" calc
 文・import・属性参照・文字列は受け付けず、式長1000字・構文128ノード・整数4096bit・指数絶対値1000まで。
 計算式の誤りは理由と再入力例を stderr に示して終了2。既存の引数あり `pycalc '...'` は互換性のため従来の Python 式評価を保ち、信頼できる式だけに使う。
 
+## mise：複数言語の共通入口
+
+Python の環境・依存は uv に任せ、Node/Bun/Go などの本体は mise でまとめて管理できる。
+olnm は薄い呼び出し口として、mise の引数・設定・ロック形式をそのまま使う。各言語のパッケージ管理は引き続き uv / npm・Bun / Go modules が担当する。
+mise のインストール自体は [公式手順](https://mise.jdx.dev/getting-started.html)で一度だけ行う。
+`python3 "$OLNM_PY" tools mise` でも PATH の有無と導入先を確認できる。
+olnm が mise や Node/Bun/Go を勝手にインストールすることはない。
+
+### シェル関数から使う
+
+最新定義を eval で読み込んでから使う。通常は個人共通のバージョンを一度設定し、プロジェクトごとの差があるときだけ上書きする。
+以下の use / global / install は実際に導入・設定変更を行う操作なので、使うものだけを選んで実行する。
+
+| olnm 関数 | mise に渡す操作 | 用途 |
+|---|---|---|
+| `miseglobal node@26 bun@latest go@latest` | `mise use --global ...` | 個人共通の本体を導入して既定値にする |
+| `miseuse node@26` | `mise use ...` | 作業ディレクトリの mise.toml へ記録して導入 |
+| `miseinstall` | `mise install` | 既存設定に従って本体を導入 |
+| `miseexec -- node --version` | `mise exec -- ...` | 設定を適用した子プロセスを起動 |
+| `miseexec node@26 -- node --version` | `mise exec node@26 -- ...` | 設定を書き換えず、その実行だけ版を指定 |
+| `miseoffline -- node --version` | 自動導入を無効にした `mise exec` | 導入済み環境で実行 |
+| `misels` | `mise ls` | バージョンと設定元を確認 |
+| `miselock` | `mise lock` | 正確なバージョン・チェックサム等をロック |
+| `misedoctor` | `mise doctor` | mise の設定を診断 |
+
+`miseexec` はシェルを activate しなくても利用でき、親シェルの PATH は変更しない。
+`miseglobal` / `miseuse` の後も、実行は `miseexec -- ...` にすれば現在のシェルへ即時に反映されるかどうかを気にせず使える。
+`miseuse` の `--pin` など、mise の追加オプションはそのまま渡る。ロックの機能・対応範囲は導入した mise のバージョンにも依存する。
+`miseexec` 等のツール指定位置は node@26 / bun@latest / go@latest / uv@latest の候補を Tab で表示する。他のツールもそのまま入力できる。
+
+```sh
+miseexec node@26 -- node --version
+miseexec bun@latest -- bun --version
+miseexec go@latest -- go version
+miseexec -- uv run --locked python -c 'print(6*7)'
+```
+
+**`mise exec` は設定に従って不足したツールを自動導入する場合がある。**
+初回の版情報取得がタイムアウトし、警告後に PATH 上の別バージョンが実行される場合も実測した。
+初回は `miseinstall node@26` → `miseexec node@26 -- node --version` の順で、導入成功と表示された実バージョンを確認する。
+ラッパーは mise の警告を stderr に保ち、終了0だけを要求バージョンの確認結果にはしない。
+`miseoffline` は `MISE_AUTO_INSTALL=false` と `MISE_EXEC_AUTO_INSTALL=false` を子プロセスに設定する。
+これは完全なネットワーク遮断ではない。実行したコマンド・設定内の処理・バックエンドの通信まで止めるものではない。
+🌍 の付いたラッパーは従来の dial 0/1 では停止し、miseoffline / misels / misedoctor は利用できる。
+Python API と後述の `olnm mise` は任意の mise コマンドを明示的に呼ぶ入口で、olnm の dial を適用せず mise 自体の設定に従う。
+
+### Python / uv / Node から同じ処理を呼ぶ
+
+ファイルを保存してあれば、シェル関数の登録なしで呼べる。
+
+```sh
+python3 "$OLNM_PY" mise exec node@26 -- node --version
+uv run --no-project "$OLNM_PY" mise exec node@26 -- node --version
+```
+
+uv tool 登録後なら `command olnm mise exec node@26 -- node --version`。
+eval 後の `olnm mise` 1語は mise 分類の一覧、`olnm mise exec ...` は mise への呼び出しになる。
+
+`olnm.py` を import 可能な場所へ置くか、利用側へ依存登録した Python 環境では：
+
+```sh
+python3 -c 'import olnm, sys; sys.exit(olnm.mise("exec", "node@26", "--", "node", "--version"))'
+```
+
+uv プロジェクトなら `uv run python -c ...` として同じ API を呼べる。
+`olnm.mise()` は bash を経由せず argv リストで起動し、呼出し元の cwd・stdin・stdout・stderr・終了コードを引き継ぐ。
+JSON が必要なデータ API ではないため、子出力が混じる `call mise` は使わず、CLI または Python API を使う。
+ファイル方式と uv tool 方式の import 環境の違いは既存の説明と同じ。
+
+Node 側もシェル文字列を組み立てず argv 配列で呼ぶ。以下を `invoke-olnm.cjs` として保存すると、Node/Bun のどちらからも呼べる。
+
+```js
+const { spawnSync } = require('node:child_process');
+const result = spawnSync('python3', [
+  process.env.OLNM_PY, 'mise', 'exec', 'node@26', '--', 'node', '--version'
+], { stdio: 'inherit' });
+if (result.error) { console.error(result.error.message); process.exit(127); }
+process.exit(result.status ?? 1);
+```
+
+```sh
+node invoke-olnm.cjs
+bun invoke-olnm.cjs
+```
+
+Node/Bun 自体がまだない場合は、最初の一回を上記の Python/uv の入口から呼ぶ。
+`--` 以降は実行するコマンドの引数として保ち、空白・引用符・日本語も argv の要素単位で渡す。
+mise 不在時は公式導入先と次の操作を stderr に示し、終了127。勝手なシェル設定の変更はしない。
+
+公式: [exec](https://mise.jdx.dev/cli/exec) / [use](https://mise.jdx.dev/cli/use.html) / [自動導入の設定](https://mise.jdx.dev/configuration/settings.html) / [lock](https://mise.jdx.dev/cli/lock)。
+
 ## Node・Bun・Rust と作業ディレクトリ
 
 Ubuntu / WSL にこれらが初めから入っているとは限らない。Windows 側へ入れたものと WSL 側の Linux 版も別に確認する。
@@ -758,7 +851,7 @@ python3 -m unittest discover -s tests -v
 ```
 
 forge 本体の代わりに tests/fake_forgejo.py で CLI / REST を代行し、dial・Git remote・Issue・PR・mirror 登録を確認する。
-実際の forge 取得、外部サービスへの push、全 233 関数の副作用を伴う実行はこのテストでは行わない。
+実際の forge 取得、外部サービスへの push、全 241 関数の副作用を伴う実行はこのテストでは行わない。
 全関数の定義・名前の一意性、全 CLI 階層のヘルプ、代表例の実出力・終了コードを確認する。
 Python ワンライナー、JSON、stdin、空白やシェル特殊文字を含むパス、uv の導入経路も確認する。
 追加の入力支援テストは bash / zsh の補完登録と候補、疑似端末での式入力と Tab、タイポ候補、不正JSON、Node/Bun不在時の案内を確認する。zsh / readline がない環境では該当ケースのみ skip。
@@ -823,6 +916,7 @@ Path の戻り値は CLI call で JSON 文字列、戻り値なしは null と�
 | `init(shell: str \| None = None) -> str` | `olnm.init("bash")` | `init '["bash"]'` | Shell code to eval: functions + dial stubs + typo hook + completion. |
 | `like(word: str, hint: bool = False, n: int = 6) -> list[str]` | `olnm.like("uvtets", n=2)` | `like '["uvtets"]' --kwargs '{"n":2}'` | Closest names: substring hits first, then difflib similarity ≥0.5. |
 | `ls(section: str \| None = None, offline: bool = False) -> list[dict]` | `olnm.ls("python", offline=True)` | `ls '["python"]' --kwargs '{"offline":true}'` | Print help lines, optionally one section and/or offline-only. |
+| `mise(*args: str) -> int` | `raise SystemExit(olnm.mise("exec", "--", "node", "--version"))` | mise サブコマンドを使う | argv・入出力・終了コードを引き継ぐ直接呼び出し。 |
 | `names() -> list[str]` | `print(olnm.names())` | `names` | All function names (help lines only, private helpers excluded). |
 | `net() -> list[str]` | `olnm.net()` | `net` | Names that need internet (🌍). |
 | `public() -> list[str]` | `print(olnm.public())` | `public` | Names callable through `call`. |
@@ -1150,5 +1244,18 @@ Path の戻り値は CLI call で JSON 文字列、戻り値なしは null と�
 | `todo` | ✅ append todo (todo "x") / list open ones |
 | `done1` | ✅ mark todo line n done (done1 3) |
 | `jnl` | 📓 open today's journal ~/journal/YYYY-MM-DD.md |
+
+### mise
+
+| 関数 | 説明 |
+|---|---|
+| `miseuse` | ➕ 🌍 install tools and record project versions (miseuse node@26) |
+| `miseglobal` | 🌐 🌍 install tools and set personal defaults (miseglobal node@26 bun@latest go@latest) |
+| `miseinstall` | 📦 🌍 install configured or specified tools |
+| `miseexec` | ▶️ 🌍 run in mise environment, installing missing tools as mise settings allow (miseexec node@26 -- node -v) |
+| `miseoffline` | 🔌 run with automatic tool installation disabled; child command may still use network (miseoffline -- node -v) |
+| `misels` | 📋 list mise tool versions and configuration sources |
+| `miselock` | 🔒 🌍 create or refresh mise.lock versions, checksums and download URLs |
+| `misedoctor` | 🩺 diagnose mise installation and configuration |
 
 <!-- shell-catalog:end -->

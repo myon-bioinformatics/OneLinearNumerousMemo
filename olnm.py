@@ -41,14 +41,14 @@ PY = Path(__file__).resolve()
 OLNM_HOME = Path(os.environ.get("OLNM_HOME", Path.home() / ".olnm"))
 DIAL_FILE = Path(os.environ.get("DIAL_FILE", OLNM_HOME / "dial"))
 DIALS = {0: "🔌 offline", 1: "🏠 local", 2: "🔁 mirror", 3: "☁️ github"}
-TOOLS = ("python3", "uv", "node", "npm", "npx", "bun", "rustc", "cargo", "rustup", "git", "gh", "fzf", "fd", "rg", "jq", "curl", "docker", "tmux", "entr", "tree")
+TOOLS = ("python3", "uv", "mise", "node", "npm", "npx", "bun", "go", "rustc", "cargo", "rustup", "git", "gh", "fzf", "fd", "rg", "jq", "curl", "docker", "tmux", "entr", "tree")
 HELP = re.compile(r"^# (\S+) ([A-Za-z_0-9]+): (.*)$")
 SECTION = re.compile(r"^# ─+ (\S+) (\S+) ─+$")
 
 # ───────────────────────── 📖 meta (shell shims → this file) ─────────────────────────
 META = r"""
 # 📖 olnm: list one-liners (olnm git = one section)
-olnm() { if [ "$#" -eq 1 ]; then case " $_OLNM_SECTIONS " in *" $1 "*) python3 "$OLNM_PY" ls "$@"; return $?;; esac; fi; case "${1-}" in -h|--help|init|ls|grep|like|sections|net|doctor|dial|run|call|hub|complete|calc|tools) python3 "$OLNM_PY" "$@";; *) python3 "$OLNM_PY" ls "$@";; esac; }
+olnm() { if [ "$#" -eq 1 ]; then case " $_OLNM_SECTIONS " in *" $1 "*) python3 "$OLNM_PY" ls "$@"; return $?;; esac; fi; case "${1-}" in -h|--help|init|ls|grep|like|sections|net|doctor|dial|run|call|hub|complete|calc|tools|mise) python3 "$OLNM_PY" "$@";; *) python3 "$OLNM_PY" ls "$@";; esac; }
 # 🔎 olnm_grep: search help text (olnm_grep json)
 olnm_grep() { python3 "$OLNM_PY" grep "$@"; }
 # 🤔 olnm_like: closest names to a typo or fragment (olnm_like uvtets)
@@ -549,6 +549,25 @@ todo() { [ -n "$1" ] && printf -- '- [ ] %s\n' "$*" >> ~/todo.md || grep -n '\[ 
 done1() { sed -i "${1}s/\[ \]/[x]/" ~/todo.md && grep -n '\[x\]' ~/todo.md | tail -1; }
 # 📓 jnl: open today's journal ~/journal/YYYY-MM-DD.md
 jnl() { mkdir -p ~/journal && "${EDITOR:-vi}" ~/journal/"$(date +%F)".md; }
+# ───────────────────────── 🧰 mise ─────────────────────────
+# ➕ miseuse: 🌍 install tools and record project versions (miseuse node@26)
+miseuse() { _olnm_require mise || return $?; command mise use "$@"; }
+# 🌐 miseglobal: 🌍 install tools and set personal defaults (miseglobal node@26 bun@latest go@latest)
+miseglobal() { _olnm_require mise || return $?; command mise use --global "$@"; }
+# 📦 miseinstall: 🌍 install configured or specified tools
+miseinstall() { _olnm_require mise || return $?; command mise install "$@"; }
+# ▶️ miseexec: 🌍 run in mise environment, installing missing tools as mise settings allow (miseexec node@26 -- node -v)
+miseexec() { _olnm_require mise || return $?; command mise exec "$@"; }
+# 🔌 miseoffline: run with automatic tool installation disabled; child command may still use network (miseoffline -- node -v)
+miseoffline() { _olnm_require mise || return $?; MISE_AUTO_INSTALL=false MISE_EXEC_AUTO_INSTALL=false command mise exec "$@"; }
+# 📋 misels: list mise tool versions and configuration sources
+misels() { _olnm_require mise || return $?; command mise ls "$@"; }
+# 🔒 miselock: 🌍 create or refresh mise.lock versions, checksums and download URLs
+miselock() { _olnm_require mise || return $?; command mise lock "$@"; }
+# 🩺 misedoctor: diagnose mise installation and configuration
+misedoctor() { _olnm_require mise || return $?; command mise doctor "$@"; }
+
+
 """
 
 
@@ -1105,12 +1124,16 @@ HUB_SUBS = "install bundle init up down status doctor logs dial repo api issue p
 
 
 _RUNTIME_GUIDES = {
-    "node": ("https://nodejs.org/en/download", "With nvm installed: nvm install 26 && nvm use 26",
-             "Record 26 in .nvmrc; run nvm use in the project. npm install installs project dependencies, not Node."),
+    "mise": ("https://mise.jdx.dev/getting-started.html", "Install mise for this WSL/Linux user using the official guide; then check mise --version.",
+             "Set personal defaults: mise use --global node@26 bun@latest go@latest. Python projects can keep using uv."),
+    "node": ("https://nodejs.org/en/download", "With mise installed: mise use --global node@26 (or use your existing nvm installation).",
+             "Override only when needed: mise use node@26 in the project. npm install installs project dependencies, not Node."),
     "bun": ("https://bun.sh/docs/installation", "Install Bun for this WSL/Linux user using the official guide; then check bun --version.",
             "Check ~/.bun/bin is on PATH. bun install installs project dependencies, not Bun."),
     "rust": ("https://rust-lang.org/tools/install", "Install the Rust toolchain with rustup; then check rustc --version and cargo --version.",
              "Check ~/.cargo/bin is on PATH. Pin the project toolchain in rust-toolchain.toml; build output goes to target/."),
+    "go": ("https://go.dev/doc/install", "With mise installed: mise use --global go@latest; then check mise exec -- go version.",
+           "Use mise.toml for a project-specific runtime; go.mod/go.sum still manage Go dependencies."),
 }
 
 
@@ -1119,10 +1142,10 @@ def tools(name: str | None = None) -> dict:
     aliases = {"npm": "node", "npx": "node", "bunx": "bun", "rustc": "rust", "cargo": "rust", "rustup": "rust"}
     key = aliases.get(name, name)
     if key is not None and key not in _RUNTIME_GUIDES:
-        raise ValueError("choose node, bun or rust")
+        raise ValueError("choose mise, node, bun, go or rust")
     result = {}
     for runtime in ([key] if key else _RUNTIME_GUIDES):
-        executables = {"node": ("node", "npm", "npx"), "bun": ("bun", "bunx"), "rust": ("rustc", "cargo", "rustup")}[runtime]
+        executables = {"mise": ("mise",), "node": ("node", "npm", "npx"), "bun": ("bun", "bunx"), "go": ("go",), "rust": ("rustc", "cargo", "rustup")}[runtime]
         found = {exe: shutil.which(exe) for exe in executables}
         url, setup, project = _RUNTIME_GUIDES[runtime]
         result[runtime] = found
@@ -1130,6 +1153,16 @@ def tools(name: str | None = None) -> dict:
         print(f"  {setup}\n  {project}\n  {url}")
     print("Ubuntu/WSL does not guarantee these runtimes are installed. Install per user; project dependencies stay in the work directory. olnm itself needs no Node/Bun/Rust.")
     return result
+
+
+def mise(*args: str) -> int:
+    """Forward argv to mise without a shell, inheriting cwd, stdin/stdout/stderr and exit code."""
+    executable = shutil.which("mise")
+    if executable is None:
+        with contextlib.redirect_stdout(sys.stderr):
+            tools("mise")
+        return 127
+    return subprocess.run([executable, *args]).returncode
 
 
 def calc(expression: str) -> int | float:
@@ -1190,6 +1223,10 @@ def _completion(words: list[str]) -> list[str]:
     if not tokens:
         tokens = [""]
     prefix = tokens[-1]
+    if command in {"miseuse", "miseglobal", "miseinstall", "miseexec", "miseoffline"}:
+        return [n for n in ("bun@latest", "go@latest", "node@26", "uv@latest") if n.startswith(prefix)] if "--" not in tokens[:-1] and not prefix.startswith("-") else []
+    if command == "olnm" and tokens[0] == "mise":
+        return [n for n in ("doctor", "exec", "install", "lock", "ls", "use") if n.startswith(prefix)] if len(tokens) == 2 else []
     if command in {"olnm_offline", "olnm_like"}:
         pool = _sections() if command == "olnm_offline" else names()
         return sorted(n for n in pool if n.startswith(prefix))
@@ -1272,7 +1309,7 @@ def init(shell: str | None = None) -> str:
   candidates=("${(@f)$(python3 "$OLNM_PY" complete -- "${words[@]:0:$CURRENT}")}")
   (( ${#candidates} )) && compadd -- "${candidates[@]}"
 }
-(( $+functions[compdef] )) && compdef _olnm_complete_zsh olnm olnm_offline olnm_like olnm_dial hubdial
+(( $+functions[compdef] )) && compdef _olnm_complete_zsh olnm olnm_offline olnm_like olnm_dial hubdial miseuse miseglobal miseinstall miseexec miseoffline
 ''')
     else:
         parts.append('command_not_found_handle() { _olnm_cnf "$@"; }')
@@ -1281,7 +1318,7 @@ def init(shell: str | None = None) -> str:
   COMPREPLY=()
   while IFS= read -r candidate; do COMPREPLY+=("$candidate"); done < <(python3 "$OLNM_PY" complete -- "${COMP_WORDS[@]:0:COMP_CWORD+1}")
 }
-complete -o default -F _olnm_complete_bash olnm olnm_offline olnm_like olnm_dial hubdial
+complete -o default -F _olnm_complete_bash olnm olnm_offline olnm_like olnm_dial hubdial miseuse miseglobal miseinstall miseexec miseoffline
 ''')
     code = "\n".join(parts) + "\n"
     print(code, end="")
@@ -1358,7 +1395,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_parser("sections", help="🗂️ sections"); sp.add_parser("net", help="🌍 internet-needing names"); sp.add_parser("doctor", help="🩺 tools")
     s = sp.add_parser("complete", help="Tab candidates (shell command and words, ending with current word)"); s.add_argument("words", nargs=argparse.REMAINDER)
     s = sp.add_parser("calc", help="arithmetic; no arguments prompts for an expression without shell quoting"); s.add_argument("expression", nargs=argparse.REMAINDER)
-    s = sp.add_parser("tools", help="optional Node/Bun/Rust setup and project-local usage (no installation)"); s.add_argument("name", nargs="?", choices=["node", "npm", "npx", "bun", "bunx", "rust", "rustc", "cargo", "rustup"])
+    s = sp.add_parser("tools", help="optional mise/Node/Bun/Go/Rust setup and project-local usage (no installation)"); s.add_argument("name", nargs="?", choices=["mise", "node", "npm", "npx", "bun", "bunx", "go", "rust", "rustc", "cargo", "rustup"])
+    s = sp.add_parser("mise", help="forward arguments to mise (exec can auto-install; use --help for olnm wrapper help)"); s.add_argument("args", nargs=argparse.REMAINDER)
     s = sp.add_parser("dial", help="🎛️ show/set dial"); s.add_argument("level", nargs="?", type=int, choices=sorted(DIALS))
     s = sp.add_parser("run", help="▶️ run one one-liner in bash"); s.add_argument("name"); s.add_argument("args", nargs=argparse.REMAINDER)
     s = sp.add_parser("call", help="🔌 call a function by name → JSON"); s.add_argument("fn"); s.add_argument("args", nargs="?", default="[]"); s.add_argument("--kwargs", default="{}")
@@ -1415,6 +1453,7 @@ def main(argv: list[str] | None = None) -> int:
         case "doctor": doctor()
         case "complete": complete(*(a.words[1:] if a.words[:1] == ["--"] else a.words))
         case "tools": tools(a.name)
+        case "mise": return mise(*(a.args[1:] if a.args[:1] == ["--"] else a.args))
         case "calc":
             try:
                 if a.expression:
