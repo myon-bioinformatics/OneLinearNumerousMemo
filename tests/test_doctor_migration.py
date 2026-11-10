@@ -7,6 +7,25 @@ import unittest
 
 
 class DoctorMigrationTest(unittest.TestCase):
+    def test_reports_running_and_uv_managed_python(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            uv = home / 'uv'
+            uv.write_text('#!/bin/sh\nif [ "$1 $2" = "python list" ]; then printf "cpython-3.12.7 /managed/python\\n"; fi\n')
+            uv.chmod(0o755)
+            node = home / 'node'
+            node.write_text('#!/bin/sh\nprintf "v26.0.0\\n"\n')
+            node.chmod(0o755)
+            env = dict(os.environ, HOME=tmp, PATH=tmp, OLNM_HOME=str(home / 'state'), DIAL_FILE=str(home / 'dial'))
+            source = Path(__file__).resolve().parents[1] / 'olnm.py'
+            result = subprocess.run([sys.executable, str(source), 'doctor'], env=env, capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('Python running olnm: ' + sys.version.split()[0], result.stdout)
+            self.assertIn('python3 on PATH: not found', result.stdout)
+            self.assertIn('cpython-3.12.7 /managed/python', result.stdout)
+            self.assertIn('node: v26.0.0 (' + str(node) + ')', result.stdout)
+            self.assertIn('bun: not found on PATH', result.stdout)
+
     def test_uv_tool_registration_changes_guidance(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)

@@ -510,7 +510,7 @@ uvcheck は ruff が必要なので先に uvdev ruff。uvinit は既存プロジ
 | 関数 | 実行例 | 前提・結果 |
 |---|---|---|
 | uvinit | `uvinit demo` | 空の cwd にプロジェクト作成 + sync |
-| uvadd | `uvadd requests` | cwd へ依存追加 + sync。ネットワーク使用 |
+| uvadd | `uvadd requests` | uv add に委譲し、通常は依存追加後に同期。`--no-sync` も利用可 |
 | uvdev | `uvdev ruff` | 開発依存追加。ネットワーク使用 |
 | uvtest | `uvtest -v` | lock に従い unittest。先に uv.lock を作成 |
 | uvcheck | `uvcheck` | ruff check → uvtest。ruff が必要 |
@@ -520,7 +520,7 @@ uvcheck は ruff が必要なので先に uvdev ruff。uvinit は既存プロジ
 | uvupall | `uvupall` | 全依存の lock 更新 + sync |
 | uvfmt | `uvfmt` | uvx で ruff format / fix。ファイルを書換え |
 | uvbuild | `uvbuild` | build-system 設定済みプロジェクトを dist/ にビルド |
-| uvpys | `uvpys 3.11` | Python を取得。引数なしなら導入済み一覧 |
+| uvpys | `uvpys 3.11 3.12` | 指定した Python を取得。引数なしなら導入済み一覧。失敗時は終了コードを返す |
 | uvresync | `uvresync` | lock を削除して再解決。先に差分を保存 |
 | uvclean | `uvclean` | cwd の .venv / build / dist / キャッシュを削除 |
 
@@ -557,7 +557,9 @@ run は子コマンドの終了コードを返す。call の数値の戻り値�
 
 ### uv へ整理する前の診断
 
-`olnm doctor` は Python・olnm のパス、ツールの有無、uv への登録状況、`OLNM_` と `DIAL_FILE` の環境変数名、bash/zsh の主な起動ファイル内の関連行番号、旧 `~/.olnm.py` や `~/.olnm` の存在を表示する。環境変数の値や設定行の内容は表示せず、ファイルの変更や削除は行わない。行番号は候補であり、間接的に読み込まれるファイルや親シェル内の関数・エイリアスは検査できないため、`type -a olnm` も合わせて確認する。
+`olnm doctor` は実行中の Python のバージョンとパス、PATH 上の python3、uv 管理下のインストール済み Python、olnm のパス、ツールの有無、uv への登録状況、`OLNM_` と `DIAL_FILE` の環境変数名、bash/zsh の主な起動ファイル内の関連行番号、旧 `~/.olnm.py` や `~/.olnm` の存在を表示する。環境変数の値や設定行の内容は表示せず、ファイルの変更や削除は行わない。行番号は候補であり、間接的に読み込まれるファイルや親シェル内の関数・エイリアスは検査できないため、`type -a olnm` も合わせて確認する。
+
+Node、Bun、Go、Rust、uv、mise は PATH 上の実行ファイルとバージョンを表示する。見つからない場合は `not found on PATH` と表示し、導入や更新は行わない。mise にインストール済みでも PATH に有効化されていないランタイムは、この表示では確認できない。
 
 表示された起動ファイルから不要な olnm の設定を外し、新しいシェルを開く。uv に登録するには `uv tool install --force 'git+https://github.com/myon-bioinformatics/OneLinearNumerousMemo.git@main'` を実行する。PATH に見つからない場合は `uv tool update-shell` を実行して新しいシェルを開く。診断は任意ツールが見つからなくても成功終了する。
 
