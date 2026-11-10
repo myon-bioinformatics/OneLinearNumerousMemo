@@ -724,9 +724,9 @@ bundle はバイナリ・.sha256・olnm.py を含む。Python / git 自体は別
 amd64 以外は Python API `hub_bundle(..., arch="arm64")` などで明示し、取得元の対応を確認する。
 forge なしでも gbundle / gunbundle で Git を持ち運べる。
 
-uvbundle は内部で `uv pip download` を試し、失敗時は `python3 -m pip download` へ進む。
+uvbundle は `uv tool run --from pip pip download` で wheels を取得する。初回は pip 自体の取得にもネットワークが必要。取得失敗時は失敗として終了する。
 uv に download がない版では pip が必要。オンライン側で wheels / requirements.txt / 対応 Python を準備する。
-uvoffline は wheels があればそこから install、なければ uv sync --offline。
+uvoffline は wheels があればそこから install、なければ uv sync --offline。wheels からのインストールが失敗した場合はその失敗を返す。
 必要なファイルやキャッシュなしで依存を生成する機能ではない。
 
 ## Node / Bun から呼ぶ
