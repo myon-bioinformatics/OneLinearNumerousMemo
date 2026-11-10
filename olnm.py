@@ -48,7 +48,7 @@ SECTION = re.compile(r"^# ─+ (\S+) (\S+) ─+$")
 # ───────────────────────── 📖 meta (shell shims → this file) ─────────────────────────
 META = r"""
 # 📖 olnm: list one-liners (olnm git = one section)
-olnm() { if [ "$#" -eq 1 ]; then case " $_OLNM_SECTIONS " in *" $1 "*) python3 "$OLNM_PY" ls "$@"; return $?;; esac; fi; case "${1-}" in -h|--help|init|ls|grep|like|sections|net|doctor|dial|run|call|hub|complete|calc|tools|mise|yourself) python3 "$OLNM_PY" "$@";; *) python3 "$OLNM_PY" ls "$@";; esac; }
+olnm() { if [ "$#" -eq 1 ]; then case " $_OLNM_SECTIONS " in *" $1 "*) python3 "$OLNM_PY" ls "$@"; return $?;; esac; fi; case "${1-}" in -h|--help|init|ls|grep|like|sections|net|doctor|dial|run|call|hub|complete|calc|tools|mise|yourself|xprobe|cli_args|ghi|markdown|ascii_artist) python3 "$OLNM_PY" "$@";; *) python3 "$OLNM_PY" ls "$@";; esac; }
 # 🔎 olnm_grep: search help text (olnm_grep json)
 olnm_grep() { python3 "$OLNM_PY" grep "$@"; }
 # 🤔 olnm_like: closest names to a typo or fragment (olnm_like uvtets)
@@ -119,6 +119,16 @@ pyjson() { python3 -m json.tool "$@"; }
 pycalc() { if [ "$#" -eq 0 ]; then python3 "$OLNM_PY" calc; else python3 -c "from math import *; print($*)"; fi; }
 # 🧾 yourself: bundled standard-library environment report; no separate file or registration
 yourself() { python3 "$OLNM_PY" yourself "$@"; }
+# 📦 xprobe: single-file xprobe via uv's cached, pinned tool environment
+xprobe() { python3 "$OLNM_PY" xprobe "$@"; }
+# 📦 cli_args: single-file CLI argument helpers via uv's cached tool environment
+cli_args() { python3 "$OLNM_PY" cli_args "$@"; }
+# 📦 ghi: single-file gh_identity CLI via uv's cached tool environment
+ghi() { python3 "$OLNM_PY" ghi "$@"; }
+# 📦 markdown: single-file Markdown stdio CLI via uv's cached tool environment
+markdown() { python3 "$OLNM_PY" markdown "$@"; }
+# 📦 ascii_artist: single-file ASCII CLI via uv's cached tool environment
+ascii_artist() { python3 "$OLNM_PY" ascii_artist "$@"; }
 # 📥 pyimp: check if module is importable and where (pyimp numpy)
 pyimp() { python3 -c "import importlib,sys; m=importlib.import_module(sys.argv[1]); print(m.__name__, getattr(m,'__version__','?'), m.__file__)" "$1"; }
 # 📦 pymods: list top-level importable third-party modules
@@ -1126,6 +1136,8 @@ HUB_SUBS = "install bundle init up down status doctor logs dial repo api issue p
 
 
 _RUNTIME_GUIDES = {
+    "uv": ("https://docs.astral.sh/uv/getting-started/installation/", "Install uv once for this WSL/Linux user; then check uv --version.",
+           "olnm's single-file tool commands use uv tool run; no manual registration is required."),
     "mise": ("https://mise.jdx.dev/getting-started.html", "Install mise for this WSL/Linux user using the official guide; then check mise --version.",
              "Set personal defaults: mise use --global node@26 bun@latest go@latest. Python projects can keep using uv."),
     "node": ("https://nodejs.org/en/download", "With mise installed: mise use --global node@26 (or use your existing nvm installation).",
@@ -1144,10 +1156,10 @@ def tools(name: str | None = None) -> dict:
     aliases = {"npm": "node", "npx": "node", "bunx": "bun", "rustc": "rust", "cargo": "rust", "rustup": "rust"}
     key = aliases.get(name, name)
     if key is not None and key not in _RUNTIME_GUIDES:
-        raise ValueError("choose mise, node, bun, go or rust")
+        raise ValueError("choose uv, mise, node, bun, go or rust")
     result = {}
     for runtime in ([key] if key else _RUNTIME_GUIDES):
-        executables = {"mise": ("mise",), "node": ("node", "npm", "npx"), "bun": ("bun", "bunx"), "go": ("go",), "rust": ("rustc", "cargo", "rustup")}[runtime]
+        executables = {"uv": ("uv",), "mise": ("mise",), "node": ("node", "npm", "npx"), "bun": ("bun", "bunx"), "go": ("go",), "rust": ("rustc", "cargo", "rustup")}[runtime]
         found = {exe: shutil.which(exe) for exe in executables}
         url, setup, project = _RUNTIME_GUIDES[runtime]
         result[runtime] = found
@@ -1165,6 +1177,48 @@ def mise(*args: str) -> int:
             tools("mise")
         return 127
     return subprocess.run([executable, *args]).returncode
+
+
+# BEGIN STDLIB TOOL SOURCES (reviewed commits, no registry or setup step for users)
+_STDLIB_TOOLS = {'xprobe': {'repo': 'xprobe', 'command': 'xprobe', 'commit': 'aa2c18101a1dd29da84f408ee83c1aa573911c20'}, 'cli_args': {'repo': 'cli_args', 'command': 'cli_args', 'commit': 'eb6b8bc0c09023a69b8a6fc04be2979209d0a5c3'}, 'ghi': {'repo': 'gh_identity', 'command': 'ghi', 'commit': '1980ba2eaa35982c99c42c9fd73bfd884ef28c78'}, 'markdown': {'repo': 'markdown', 'command': 'md-market', 'commit': '83e19c25abfefa0fe8bbb258390397f2818b5c62'}, 'ascii_artist': {'repo': 'ascii_artist', 'command': 'ascii_artist', 'commit': '2464c3669e8f64aa3cca06f78499443ba59309a9'}}
+# END STDLIB TOOL SOURCES
+
+
+def _stdlib_tool(name: str, *args: str) -> int:
+    executable = shutil.which("uv")
+    if executable is None:
+        with contextlib.redirect_stdout(sys.stderr):
+            tools("uv")
+        return 127
+    tool = _STDLIB_TOOLS[name]
+    source = f"git+https://github.com/myon-bioinformatics/{tool['repo']}.git@{tool['commit']}"
+    offline = ["--offline"] if read_dial() <= 1 else []
+    return subprocess.run([executable, *offline, "tool", "run", "--from", source, tool["command"], *args]).returncode
+
+
+def xprobe(*args: str) -> int:
+    """Run the default xprobe command through uv's pinned tool cache."""
+    return _stdlib_tool("xprobe", *args)
+
+
+def cli_args(*args: str) -> int:
+    """Run the default cli_args command through uv's pinned tool cache."""
+    return _stdlib_tool("cli_args", *args)
+
+
+def ghi(*args: str) -> int:
+    """Run the default gh_identity command through uv's pinned tool cache."""
+    return _stdlib_tool("ghi", *args)
+
+
+def markdown(*args: str) -> int:
+    """Run the default md-market stdio command through uv's pinned tool cache."""
+    return _stdlib_tool("markdown", *args)
+
+
+def ascii_artist(*args: str) -> int:
+    """Run the default ascii_artist command through uv's pinned tool cache."""
+    return _stdlib_tool("ascii_artist", *args)
 
 
 def _yourself_namespace() -> dict:
@@ -1436,9 +1490,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_parser("sections", help="🗂️ sections"); sp.add_parser("net", help="🌍 internet-needing names"); sp.add_parser("doctor", help="🩺 tools")
     s = sp.add_parser("complete", help="Tab candidates (shell command and words, ending with current word)"); s.add_argument("words", nargs=argparse.REMAINDER)
     s = sp.add_parser("calc", help="arithmetic; no arguments prompts for an expression without shell quoting"); s.add_argument("expression", nargs=argparse.REMAINDER)
-    s = sp.add_parser("tools", help="optional mise/Node/Bun/Go/Rust setup and project-local usage (no installation)"); s.add_argument("name", nargs="?", choices=["mise", "node", "npm", "npx", "bun", "bunx", "go", "rust", "rustc", "cargo", "rustup"])
+    s = sp.add_parser("tools", help="optional uv/mise/Node/Bun/Go/Rust setup and project-local usage (no installation)"); s.add_argument("name", nargs="?", choices=["uv", "mise", "node", "npm", "npx", "bun", "bunx", "go", "rust", "rustc", "cargo", "rustup"])
     s = sp.add_parser("mise", help="forward arguments to mise (exec can auto-install; use --help for olnm wrapper help)"); s.add_argument("args", nargs=argparse.REMAINDER)
     s = sp.add_parser("yourself", help="bundled environment report; accepts upstream yourself options directly"); s.add_argument("args", nargs=argparse.REMAINDER)
+    for name in _STDLIB_TOOLS:
+        s = sp.add_parser(name, help="default stdlib-only command via uv's pinned tool cache"); s.add_argument("args", nargs=argparse.REMAINDER)
     s = sp.add_parser("dial", help="🎛️ show/set dial"); s.add_argument("level", nargs="?", type=int, choices=sorted(DIALS))
     s = sp.add_parser("run", help="▶️ run one one-liner in bash"); s.add_argument("name"); s.add_argument("args", nargs=argparse.REMAINDER)
     s = sp.add_parser("call", help="🔌 call a function by name → JSON"); s.add_argument("fn"); s.add_argument("args", nargs="?", default="[]"); s.add_argument("--kwargs", default="{}")
@@ -1483,6 +1539,9 @@ def _hub_main(a: argparse.Namespace) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] in _STDLIB_TOOLS:
+        args = argv[1:]
+        return _stdlib_tool(argv[0], *(args[1:] if args[:1] == ["--"] else args))
     if argv[:1] == ["yourself"]:
         args = argv[1:]
         return yourself(*(args[1:] if args[:1] == ["--"] else args))
@@ -1542,7 +1601,7 @@ def main(argv: list[str] | None = None) -> int:
 
 # BEGIN BUNDLED YOURSELF (generated by scripts/update_yourself.py)
 # Upstream: https://github.com/myon-bioinformatics/yourself
-_YOURSELF_COMMIT = 'cc8efbbf9844a423e738540cc281a4cca2e3d46a'
+_YOURSELF_COMMIT = '6e9b9b608e92e5526268675fac9feaa839043f53'
 _YOURSELF_SHA256 = 'c3915551d3723e45c2b3563dc9c7063e168b0cdd9a71a27830f836afd70d1ad5'
 _YOURSELF_LICENSE = r'''MIT License
 

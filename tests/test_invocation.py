@@ -116,6 +116,10 @@ class TestReadmeInvocation(IsolatedInvocation):
                         yield from visit(child, (*prefix, name))
 
         for path in visit(olnm.build_parser()):
+            # External single-file tools bootstrap through uv. Their exact argv
+            # and help paths are covered by test_stdlib_commands and install checks.
+            if path[:1] and path[0] in olnm._STDLIB_TOOLS:
+                continue
             with self.subTest(path=path):
                 self.assertIn("usage:", self.cli(*path, "--help").stdout)
 

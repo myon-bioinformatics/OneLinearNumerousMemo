@@ -1,6 +1,6 @@
 # 🧷 OneLinearNumerousMemo (olnm)
 
-bash/zsh 用の **242 個のシェル関数**と、ローカル GitHub（Gitea / Forgejo）を扱う **37 個の Python API**。
+bash/zsh 用の **247 個のシェル関数**と、ローカル GitHub（Gitea / Forgejo）を扱う **42 個の Python API**。
 実装は `olnm.py` 1 ファイル、実行時の Python 外部依存はゼロ。
 Python 3.11 以降、Linux（Ubuntu / WSL の Ubuntu）の bash/zsh を対象とする。
 macOS では GNU コマンドとの差異があり、PowerShell/cmd からシェル関数を使う場合は WSL 内で実行する。
@@ -11,6 +11,7 @@ Node / Bun / gh / Docker / fzf などは、それを使う関数を実行する�
 - [最初の成功まで](#最初の成功まで)
 - [呼び出し方の選び方](#呼び出し方の選び方)
 - [bash/zsh に関数を登録する](#bashzsh-に関数を登録する)
+- [標準ライブラリツールのデフォルトコマンド](#標準ライブラリツールのデフォルトコマンド)
 - [yourself：登録なしの環境レポート](#yourself登録なしの環境レポート)
 - [Python のワンライナーから使う](#python-のワンライナーから使う)
 - [JSON で関数を呼ぶ call](#json-で関数を呼ぶ-call)
@@ -124,6 +125,60 @@ source "$HOME/.local/share/olnm/olnm.sh"
 
 一覧・ダイヤル・hub などは引き続き `olnm.py` と python3 を呼ぶ。
 `olnm.sh` だけ持ち込めば全機能が Python 不要になるわけではない。
+
+## 標準ライブラリツールのデフォルトコマンド
+
+olnm を eval で読み込むと、追加の登録なしで次のコマンドを使える。
+
+```sh
+xprobe --help
+cli_args --help
+ghi --help
+printf '# Hello\n' | markdown to-html
+ascii_artist --help
+yourself --minimal --format json
+```
+
+| コマンド | 供給元・実装 | 実行方法 |
+|---|---|---|
+| yourself | yourself.py の固定スナップショット | olnm.py に同梱。Pythonだけで実行 |
+| xprobe | myon-bioinformatics/xprobe | uv の専用ツール環境をキャッシュして再利用 |
+| cli_args | myon-bioinformatics/cli_args | 同上 |
+| ghi | myon-bioinformatics/gh_identity | 同上。供給元は ghi / gh_identity を提供 |
+| markdown | myon-bioinformatics/markdown の md-market | 同上。inventory / to-html / to-markdown / toc |
+| ascii_artist | myon-bioinformatics/ascii_artist | 同上 |
+
+追加の単一ファイル群をolnm.pyへ重複コピーせず、各リポジトリの最小限の配布設定を利用する。
+供給元の実行時Python依存は空。ビルドバックエンドと開発用依存は実行時依存と区別する。
+uvが必要な入口は初回に固定したGitコミットを取得・ビルドするため通信する場合があり、その後はuvのキャッシュを再利用する。
+**利用者が uv tool install や名前の登録を先に行う必要はない。** uv不在なら公式導入先を示して終了127となる。
+
+CLI・Python・uv・Node/Bunから同じ入口を呼べる。
+
+```sh
+python3 "$OLNM_PY" xprobe --help
+python3 "$OLNM_PY" run xprobe --help
+uv run --no-project "$OLNM_PY" xprobe --help
+```
+
+```python
+import olnm
+raise SystemExit(olnm.xprobe('--help'))
+# olnm.cli_args / olnm.ghi / olnm.markdown / olnm.ascii_artist も同じ argv・終了コードの契約
+```
+
+Node/Bun側のargv配列も `[OLNM_PY, 'xprobe', '--help']` のようにするだけ。
+stdout / stderr / stdin / cwd / 終了コードは供給元へ引き継ぎ、シェル文字列として再解釈しない。
+`call xprobe` 等では実行出力と戻り値JSONが混じるため、直接CLI/APIを使う。
+
+olnm の dial 0/1 では uv に `--offline` を付け、取得済みキャッシュだけを使用する。未取得のツールは失敗する。
+uvのoffline指定は子ツールの通信を遮断しない。ghiのAPI操作等は供給元の仕様に従う。
+採用コミットは `_STDLIB_TOOLS` に完全SHAで固定し、olnm更新時に検証済みの版へ更新する。
+導入可能にする供給元PRが未マージの間はその検証済みheadを固定しており、mainへの統合後に採用SHAを更新する。
+
+olnmを介さず常用コマンドとして登録したい場合は、各リポジトリで `uv tool install .`。
+別プロジェクトからimportする場合は `uv add /絶対パス/リポジトリ` を使う。
+設定は build-system・既存モジュール・console script を中心とした最小限とし、実行時依存は増やさない。
 
 ## yourself：登録なしの環境レポート
 
@@ -910,7 +965,7 @@ python3 -m unittest discover -s tests -v
 ```
 
 forge 本体の代わりに tests/fake_forgejo.py で CLI / REST を代行し、dial・Git remote・Issue・PR・mirror 登録を確認する。
-実際の forge 取得、外部サービスへの push、全 242 関数の副作用を伴う実行はこのテストでは行わない。
+実際の forge 取得、外部サービスへの push、全 247 関数の副作用を伴う実行はこのテストでは行わない。
 全関数の定義・名前の一意性、全 CLI 階層のヘルプ、代表例の実出力・終了コードを確認する。
 Python ワンライナー、JSON、stdin、空白やシェル特殊文字を含むパス、uv の導入経路も確認する。
 追加の入力支援テストは bash / zsh の補完登録と候補、疑似端末での式入力と Tab、タイポ候補、不正JSON、Node/Bun不在時の案内を確認する。zsh / readline がない環境では該当ケースのみ skip。
@@ -981,6 +1036,11 @@ Path の戻り値は CLI call で JSON 文字列、戻り値なしは null と�
 | `public() -> list[str]` | `print(olnm.public())` | `public` | Names callable through `call`. |
 | `read_dial(default: int = 3) -> int` | `print(olnm.read_dial())` | `read_dial` | Current dial (0..3); unset = 3 (plain online box). |
 | `run(name: str, *args: str) -> int` | `raise SystemExit(olnm.run("pycalc", "6*7"))` | run サブコマンドを使う | Run one one-liner in a non-interactive bash (for Node / Bun / Python callers). |
+| `xprobe(*args: str) -> int` | `raise SystemExit(olnm.xprobe("--help"))` | xprobe サブコマンドを使う | 固定コミットの単一ファイルツールをuvのキャッシュ経由で実行。 |
+| `cli_args(*args: str) -> int` | `raise SystemExit(olnm.cli_args("--help"))` | cli_args サブコマンドを使う | 固定コミットの単一ファイルツールをuvのキャッシュ経由で実行。 |
+| `ghi(*args: str) -> int` | `raise SystemExit(olnm.ghi("--help"))` | ghi サブコマンドを使う | 固定コミットの単一ファイルツールをuvのキャッシュ経由で実行。 |
+| `markdown(*args: str) -> int` | `raise SystemExit(olnm.markdown("--help"))` | markdown サブコマンドを使う | 固定コミットの単一ファイルツールをuvのキャッシュ経由で実行。 |
+| `ascii_artist(*args: str) -> int` | `raise SystemExit(olnm.ascii_artist("--help"))` | ascii_artist サブコマンドを使う | 固定コミットの単一ファイルツールをuvのキャッシュ経由で実行。 |
 | `yourself(*args: str) -> int` | `raise SystemExit(olnm.yourself("--minimal", "--format", "json"))` | yourself サブコマンドを使う | 登録・ダウンロード不要の同梱版 main(argv)。戻り値は終了コード。 |
 | `sections() -> list[str]` | `olnm.sections()` | `sections` | Section names in file order. |
 <!-- python-api:end -->
@@ -1035,6 +1095,11 @@ Path の戻り値は CLI call で JSON 文字列、戻り値なしは null と�
 | `pyv` | 🐍 python version + path |
 | `pyhttp` | 🌐 serve current dir over http (pyhttp [port=8000]) |
 | `pyjson` | 📐 pretty-print json from file or stdin |
+| `xprobe` | 📦 single-file xprobe via uv's cached, pinned tool environment |
+| `cli_args` | 📦 single-file CLI argument helpers via uv's cached tool environment |
+| `ghi` | 📦 single-file gh_identity CLI via uv's cached tool environment |
+| `markdown` | 📦 single-file Markdown stdio CLI via uv's cached tool environment |
+| `ascii_artist` | 📦 single-file ASCII CLI via uv's cached tool environment |
 | `yourself` | 🧾 bundled standard-library environment report; no separate file or registration |
 | `pycalc` | 🧮 evaluate math expression (pycalc '2**10') |
 | `pyimp` | 📥 check if module is importable and where (pyimp numpy) |
