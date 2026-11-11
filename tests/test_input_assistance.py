@@ -88,13 +88,13 @@ class TestInputAssistance(unittest.TestCase):
     def test_completion_context_and_prefix(self):
         cases = [
             (("olnm", "ru"), ["run"]),
-            (("olnm", "run", "pyc"), ["pycalc", "pyclean", "pycsv"]),
+            (("olnm", "run", "pyc"), ["pyclean", "pycsv"]),
             (("olnm", "hub", "issue", ""), ["ls", "new"]),
             (("hubdial", "install", "--flavor", ""), ["forgejo", "gitea"]),
             (("olnm", "hub", "install", "--flavor", "gi"), ["gitea"]),
             (("olnm_dial", ""), ["0", "1", "2", "3"]),
             (("olnm_offline", "py"), ["python"]),
-            (("olnm_like", "pyc"), ["pycalc", "pyclean", "pycsv"]),
+            (("olnm_like", "pyc"), ["pyclean", "pycsv"]),
             (("olnm", "tools", "ru"), ["rust", "rustc", "rustup"]),
             (("olnm", "call", "read_"), ["read_dial"]),
         ]
@@ -107,7 +107,7 @@ class TestInputAssistance(unittest.TestCase):
                 self.assertEqual(result.stdout.splitlines(), expected)
         result = self.cli("complete", "--", "olnm", "hub", "issue", "ls", "--st")
         self.assertEqual(result.stdout.strip(), "--state")
-        self.assertEqual(self.cli("complete", "--", "olnm", "run", "pycalc", "x").stdout, "")
+        self.assertEqual(self.cli("complete", "--", "olnm", "run", "calc", "x").stdout, "")
 
     def test_bash_completion_registration_and_replies(self):
         result = self.shell('complete -p olnm; COMP_WORDS=(olnm hub install --flavor ""); COMP_CWORD=4; _olnm_complete_bash; printf "%s\\n" "${COMPREPLY[@]}"')
@@ -117,7 +117,7 @@ class TestInputAssistance(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("zsh"), "zsh unavailable")
     def test_zsh_completion_registration_and_replies(self):
-        result = self.shell('autoload -Uz compinit; compinit -D; eval "$(python3 "$OLNM_PY" init zsh)"; '
+        result = self.shell('autoload -Uz compinit; compinit -u -D; eval "$(python3 "$OLNM_PY" init zsh)"; '
                             'print -r -- "${_comps[olnm]}"; words=(olnm hub install --flavor ""); CURRENT=5; '
                             'compadd() { printf "%s\\n" "$@"; }; _olnm_complete_zsh', shell="zsh")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -129,7 +129,7 @@ class TestInputAssistance(unittest.TestCase):
             expected = self.cli("ls", section)
             self.assertEqual(result.stdout, expected.stdout, section)
             self.assertEqual(result.returncode, 0, result.stderr)
-        result = self.shell("olnm calc 6 + 7; olnm run pycalc '6*7'")
+        result = self.shell("olnm calc 6 + 7; olnm run calc 6 mul 7")
         self.assertEqual(result.stdout.splitlines(), ["13", "42"])
         self.assertIn('arithmetic', self.shell('olnm --help').stdout)
 
@@ -166,12 +166,11 @@ class TestInputAssistance(unittest.TestCase):
         error = self.cli('calc', input='6*\n')
         self.assertEqual(error.returncode, 2)
         self.assertIn('Try: olnm calc', error.stderr)
-        # No-arg pycalc uses the input route. Existing string-evaluation calls stay compatible.
-        result = subprocess.run(['bash', '-c', 'printf "%s\\n" "(6+7)*2" | python3 "$OLNM_PY" run pycalc'],
+        # The no-argument calc shell function uses the same input route.
+        result = subprocess.run(['bash', '-c', 'printf "%s\\n" "(6+7)*2" | python3 "$OLNM_PY" run calc'],
                                 env=dict(self.env, OLNM_PY=str(self.source)), cwd=self.work,
                                 capture_output=True, text=True, timeout=15)
         self.assertEqual(result.stdout.strip(), '26', result.stderr)
-        self.assertEqual(self.cli('run', 'pycalc', '"hello world"').stdout.strip(), 'hello world')
 
     def test_tty_prompt_does_not_require_shell_quoting(self):
         master, slave = pty.openpty()
@@ -241,7 +240,7 @@ class TestInputAssistance(unittest.TestCase):
         env = dict(self.env, PATH=str(bindir), OLNM_PY=str(self.source))
         for shell in ['bash'] + (['zsh'] if shutil.which('zsh') else []):
             executable = shutil.which(shell)
-            for name, expected in [('ncalc', 'nodejs.org'), ('bi', 'bun.sh')]:
+            for name, expected in [('njson', 'nodejs.org'), ('bi', 'bun.sh')]:
                 result = subprocess.run([executable, '-c', 'eval "$(python3 "$OLNM_PY" init ' + shell + ')"; ' + name],
                                         cwd=self.work, env=env, text=True, capture_output=True, timeout=15)
                 self.assertEqual(result.returncode, 127, result.stderr)
@@ -255,9 +254,9 @@ class TestInputAssistance(unittest.TestCase):
         self.assertTrue(modules.is_dir())
         # Runtime checks happen per call: installation after init requires no reload.
         result = subprocess.run([bash, '-c', 'eval "$(python3 "$OLNM_PY" init bash)"; '
-                                 'ncalc 1 >/dev/null 2>&1; '
+                                 'njson </dev/null >/dev/null 2>&1; '
                                  'printf \'#!/bin/sh\\nprintf "42\\\\n"\\n\' > "$1/node"; '
-                                 '/bin/chmod +x "$1/node"; ncalc 6*7', 'test', str(bindir)],
+                                 '/bin/chmod +x "$1/node"; njson </dev/null', 'test', str(bindir)],
                                 cwd=self.work, env=env, text=True, capture_output=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), '42')
@@ -268,7 +267,7 @@ class TestInputAssistance(unittest.TestCase):
     def test_init_and_run_handle_shell_metacharacters_in_source_path(self):
         folder = self.work / 'literal $(touch INJECTED) " quote'; folder.mkdir()
         source = folder / 'olnm.py'; shutil.copyfile(self.source, source)
-        result = subprocess.run([sys.executable, source, 'run', 'pycalc', '6*7'],
+        result = subprocess.run([sys.executable, source, 'run', 'calc', '6*7'],
                                 cwd=self.work, env=self.env, text=True, capture_output=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), '42')

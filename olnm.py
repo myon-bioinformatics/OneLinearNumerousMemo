@@ -12,7 +12,7 @@ Rules: one function per line in SHELL below, `# <emoji> name: what it does` righ
 Target: Ubuntu 26.04 with Python / Node(LTS) / uv. Bun, fzf, fd, rg, jq, gh, docker optional.
 
 Callable by name from Python (`import olnm; olnm.like("uvtets")`), shell (`python3 olnm.py call like '["uvtets"]'`)
-and Node / Bun (`execFileSync("python3", ["olnm.py", "run", "pycalc", "2**10"])`).
+and Node / Bun (`execFileSync("python3", ["olnm.py", "calc", "2**10"])`).
 """
 from __future__ import annotations
 
@@ -115,8 +115,8 @@ pyv() { python3 --version && command -v python3; }
 pyhttp() { python3 -m http.server "${1:-8000}"; }
 # 📐 pyjson: pretty-print json from file or stdin
 pyjson() { python3 -m json.tool "$@"; }
-# 🧮 pycalc: evaluate math expression (pycalc '2**10')
-pycalc() { if [ "$#" -eq 0 ]; then python3 "$OLNM_PY" calc; else python3 -c "from math import *; print($*)"; fi; }
+# 🧮 calc: quote-free numeric arithmetic (calc 6 mul 7; calc --engine node 2 pow 10)
+calc() { python3 "$OLNM_PY" calc "$@"; }
 # 🧾 yourself: bundled standard-library environment report; no separate file or registration
 yourself() { python3 "$OLNM_PY" yourself "$@"; }
 # 📦 xprobe: single-file xprobe via uv's cached, pinned tool environment
@@ -173,8 +173,6 @@ nwhy() { npm explain "$1"; }
 ninfo() { npm view "$1" version dist-tags.latest time.modified; }
 # 📐 njson: pretty-print json via node
 njson() { node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>console.log(JSON.stringify(JSON.parse(d),null,2)))'; }
-# 🧮 ncalc: evaluate JS expression (ncalc '2**10')
-ncalc() { node -p "$*"; }
 # 🌐 nhttp: serve current dir with node stdlib only (nhttp [port=3000])
 nhttp() { node -e 'const h=require("http"),f=require("fs"),p=require("path");h.createServer((q,r)=>{const u=decodeURIComponent(q.url.split("?")[0]);let x=p.join(process.cwd(),u);if(f.existsSync(x)&&f.statSync(x).isDirectory())x=p.join(x,"index.html");f.readFile(x,(e,d)=>{r.writeHead(e?404:200);r.end(e?"404":d)})}).listen(+process.argv[1],()=>console.log("http://localhost:"+process.argv[1]))' "${1:-3000}"; }
 # 🟩 nlts: 🌍 install/use Node LTS via nvm or fnm if present
@@ -1420,6 +1418,45 @@ complete -o default -F _olnm_complete_bash olnm olnm_offline olnm_like olnm_dial
     return code
 
 
+_CALC_WORDS = {"plus": "+", "minus": "-", "mul": "*", "div": "/",
+               "pow": "**", "mod": "%", "floordiv": "//", "lpar": "(", "rpar": ")"}
+
+
+def calculate(*args: str, engine: str = "python") -> int:
+    """Validate numeric arithmetic, then use the original runtime's semantics."""
+    if engine not in {"python", "node"}:
+        print(f"calc: unknown engine {engine!r}", file=sys.stderr)
+        return 1
+    expression = " ".join(_CALC_WORDS.get(word, word) for arg in args for word in arg.split())
+    try:
+        if not expression or len(expression) > 4096:
+            raise ValueError("expected 1..4096 characters of numeric arithmetic")
+        # Python's parser would silently ignore a trailing comment. Reject it
+        # before passing the expression to either runtime (JS // is a comment).
+        if "#" in expression or (engine == "node" and "//" in expression):
+            raise ValueError("comments and Node floor division are not supported")
+        tree = ast.parse(expression, mode="eval")
+        allowed = (ast.Expression, ast.BinOp, ast.UnaryOp, ast.Constant,
+                   ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv,
+                   ast.Pow, ast.Mod, ast.UAdd, ast.USub)
+        for node in ast.walk(tree):
+            if not isinstance(node, allowed):
+                raise ValueError("only numeric arithmetic is allowed; use mul/div/pow/lpar/rpar")
+            if isinstance(node, ast.Constant) and type(node.value) not in (int, float):
+                raise ValueError("only real numeric literals are allowed")
+    except (SyntaxError, ValueError, RecursionError) as exc:
+        print(f"calc: {exc}", file=sys.stderr)
+        return 1
+    if engine == "python":
+        return subprocess.run([sys.executable, "-c", f"from math import *; print({expression})"]).returncode
+    try:
+        # Parenthesize the validated expression so a leading minus is not a Node option.
+        return subprocess.run(["node", "-p", "(" + expression + ")"]).returncode
+    except FileNotFoundError:
+        print("calc: node: command not found", file=sys.stderr)
+        return 127
+
+
 def run(name: str, *args: str) -> int:
     """Run one one-liner in a non-interactive bash (for Node / Bun / Python callers)."""
     if name not in names():
@@ -1550,7 +1587,8 @@ def build_parser() -> argparse.ArgumentParser:
     s = sp.add_parser("like", help="🤔 closest names"); s.add_argument("word"); s.add_argument("--hint", action="store_true")
     sp.add_parser("sections", help="🗂️ sections"); sp.add_parser("net", help="🌍 internet-needing names"); sp.add_parser("doctor", help="🩺 tools")
     s = sp.add_parser("complete", help="Tab candidates (shell command and words, ending with current word)"); s.add_argument("words", nargs=argparse.REMAINDER)
-    s = sp.add_parser("calc", help="arithmetic; no arguments prompts for an expression without shell quoting"); s.add_argument("expression", nargs=argparse.REMAINDER)
+    s = sp.add_parser("calc", help="🧮 arithmetic: words (6 mul 7) or symbols; no arguments prompts for an expression without shell quoting")
+    s.add_argument("--engine", choices=["python", "node"], default="python"); s.add_argument("expression", nargs=argparse.REMAINDER)
     s = sp.add_parser("tools", help="optional uv/mise/Node/Bun/Go/Rust setup and project-local usage (no installation)"); s.add_argument("name", nargs="?", choices=["uv", "mise", "node", "npm", "npx", "bun", "bunx", "go", "rust", "rustc", "cargo", "rustup"])
     s = sp.add_parser("mise", help="forward arguments to mise (exec can auto-install; use --help for olnm wrapper help)"); s.add_argument("args", nargs=argparse.REMAINDER)
     s = sp.add_parser("yourself", help="bundled environment report; accepts upstream yourself options directly"); s.add_argument("args", nargs=argparse.REMAINDER)
@@ -1606,6 +1644,15 @@ def main(argv: list[str] | None = None) -> int:
     if argv[:1] == ["yourself"]:
         args = argv[1:]
         return yourself(*(args[1:] if args[:1] == ["--"] else args))
+    if argv[:1] == ["calc"]:
+        # Only the leading --engine option belongs to the CLI; the rest is math.
+        offset = 1
+        if argv[1:2] == ["--engine"]:
+            offset = 3
+        elif len(argv) > 1 and argv[1].startswith("--engine="):
+            offset = 2
+        if len(argv) > offset and argv[offset] not in {"--", "--help", "-h"}:
+            argv.insert(offset, "--")
     a = build_parser().parse_args(argv)
     match a.cmd:
         case "init": init(a.shell)
@@ -1621,10 +1668,11 @@ def main(argv: list[str] | None = None) -> int:
         case "tools": tools(a.name)
         case "mise": return mise(*(a.args[1:] if a.args[:1] == ["--"] else a.args))
         case "calc":
+            tokens = a.expression[1:] if a.expression[:1] == ["--"] else a.expression
+            if tokens:  # words or symbols on the command line: quote-free, same result as python -c / node -p
+                return calculate(*tokens, engine=a.engine)
             try:
-                if a.expression:
-                    expression = " ".join(a.expression[1:] if a.expression[:1] == ["--"] else a.expression)
-                elif sys.stdin.isatty():
+                if sys.stdin.isatty():
                     print("Expression (e.g. 6*7 or sqrt(81); no surrounding quotes): ", end="", file=sys.stderr, flush=True)
                     try:
                         import readline

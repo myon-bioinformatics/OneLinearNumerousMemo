@@ -1,6 +1,6 @@
 # 🧷 OneLinearNumerousMemo (olnm)
 
-bash/zsh 用の **247 個のシェル関数**と、ローカル GitHub（Gitea / Forgejo）を扱う **42 個の Python API**。
+bash/zsh 用の **246 個のシェル関数**と、ローカル GitHub（Gitea / Forgejo）を扱う **43 個の Python API**。
 実装は `olnm.py` 1 ファイル、実行時の Python 外部依存はゼロ。
 Python 3.11 以降、Linux（Ubuntu / WSL の Ubuntu）の bash/zsh を対象とする。
 macOS では GNU コマンドとの差異があり、PowerShell/cmd からシェル関数を使う場合は WSL 内で実行する。
@@ -14,6 +14,7 @@ Node / Bun / gh / Docker / fzf などは、それを使う関数を実行する�
 - [最初の成功まで](#最初の成功まで)
 - [呼び出し方の選び方](#呼び出し方の選び方)
 - [bash/zsh に関数を登録する](#bashzsh-に関数を登録する)
+- [引用符を省略して計算する](#引用符を省略して計算する)
 - [標準ライブラリツールのデフォルトコマンド](#標準ライブラリツールのデフォルトコマンド)
 - [yourself：登録なしの環境レポート](#yourself登録なしの環境レポート)
 - [Python のワンライナーから使う](#python-のワンライナーから使う)
@@ -43,7 +44,7 @@ Node / Bun / gh / Docker / fzf などは、それを使う関数を実行する�
 ```sh
 mkdir -p "$HOME/.local/share/olnm"
 curl -fL https://raw.githubusercontent.com/myon-bioinformatics/OneLinearNumerousMemo/main/olnm.py -o "$HOME/.local/share/olnm/olnm.py"
-python3 "$HOME/.local/share/olnm/olnm.py" run pycalc '6*7'
+python3 "$HOME/.local/share/olnm/olnm.py" calc 6 mul 7
 ```
 
 期待する出力は `42`。以降、**ファイル方式の例ではこの変数を同じターミナルで設定しておく**。
@@ -61,13 +62,13 @@ python3 "$OLNM_PY" like uvtets
 git clone https://github.com/myon-bioinformatics/OneLinearNumerousMemo.git
 cd OneLinearNumerousMemo
 export OLNM_PY="$PWD/olnm.py"
-python3 "$OLNM_PY" run pycalc '6*7'
+python3 "$OLNM_PY" calc 6 mul 7
 ```
 
 **1 行だけで取得から実行まで：**
 
 ```sh
-mkdir -p "$HOME/.local/share/olnm" && curl -fL https://raw.githubusercontent.com/myon-bioinformatics/OneLinearNumerousMemo/main/olnm.py -o "$HOME/.local/share/olnm/olnm.py" && python3 "$HOME/.local/share/olnm/olnm.py" run pycalc '6*7'
+mkdir -p "$HOME/.local/share/olnm" && curl -fL https://raw.githubusercontent.com/myon-bioinformatics/OneLinearNumerousMemo/main/olnm.py -o "$HOME/.local/share/olnm/olnm.py" && python3 "$HOME/.local/share/olnm/olnm.py" calc 6 mul 7
 ```
 
 `main` は更新される。版を固定する場合は URL の `/main/` を、確認したコミットの完全な SHA に置き換える。
@@ -77,17 +78,17 @@ mkdir -p "$HOME/.local/share/olnm" && curl -fL https://raw.githubusercontent.com
 | やりたいこと | 入力例 | 前提 | 結果 |
 |---|---|---|---|
 | ファイルから CLI | `python3 "$OLNM_PY" ls python` | ファイルを保存 | 人向けの一覧 |
-| シェル関数を 1 回実行 | `python3 "$OLNM_PY" run pycalc '6*7'` | bash と python3 | 出力と終了コードを引き継ぐ |
-| 現在のシェルに関数登録 | `eval "$(python3 "$OLNM_PY" init bash)"` | bash / zsh | 以後 `pycalc '6*7'` と打てる |
+| 計算を 1 回実行 | `python3 "$OLNM_PY" calc 6 mul 7` | python3 | 出力と終了コードを引き継ぐ |
+| 現在のシェルに関数登録 | `eval "$(python3 "$OLNM_PY" init bash)"` | bash / zsh | 以後 `calc 6 mul 7` と打てる |
 | Python API | `python3 -c 'import olnm; olnm.like("uvtets")'` | import 可能な場所／環境 | Python オブジェクト。関数によって表示も行う |
 | JSON を取得 | `python3 "$OLNM_PY" call like '["uvtets"]'` | 引数は JSON 配列 | stdout は JSON、説明表示は stderr |
-| uv でファイル実行 | `uv run --no-project "$OLNM_PY" run pycalc '6*7'` | uv | ファイル方式と同じ |
+| uv でファイル実行 | `uv run --no-project "$OLNM_PY" calc 6 mul 7` | uv | ファイル方式と同じ |
 | 常用コマンドを登録 | `uv tool install .` | clone したルート | PATH 上に `olnm` コマンド |
 | 他プロジェクトへ依存登録 | `uv add /絶対パス/OneLinearNumerousMemo` | 利用側の uv プロジェクト | `uv run python -c 'import olnm; ...'` |
 
-**`pycalc` / `uvtest` はシェル関数、`like` / `entries` は Python 関数。**
-`olnm.py pycalc ...` や `olnm.py call pycalc ...` ではなく、`olnm.py run pycalc ...` を使う。
-`olnm.pycalc(...)` という Python API もない。Python からは `olnm.run("pycalc", "6*7")` と呼ぶ。
+**`calc` はCLIサブコマンドとシェル関数、`calculate` はPython API。**
+計算は `olnm.py calc 6 mul 7`、Python からは `olnm.calculate("6", "mul", "7")` と呼ぶ。
+`uvtest` などのシェル関数は引き続き `olnm.py run uvtest ...` で呼ぶ。
 
 ## bash/zsh に関数を登録する
 
@@ -98,7 +99,7 @@ mkdir -p "$HOME/.local/share/olnm" && curl -fL https://raw.githubusercontent.com
 ```sh
 eval "$(python3 "$OLNM_PY" init bash)"
 olnm python
-pycalc '6*7'
+calc 6 mul 7
 olnm_like uvtets
 ```
 
@@ -128,6 +129,110 @@ source "$HOME/.local/share/olnm/olnm.sh"
 
 一覧・ダイヤル・hub などは引き続き `olnm.py` と python3 を呼ぶ。
 `olnm.sh` だけ持ち込めば全機能が Python 不要になるわけではない。
+
+## 引用符を省略して計算する
+
+**新しい共通入口は `calc`。** 名前は呼び出し元に依存せず、シェル、Python、Node、uv から使える。
+既定の計算エンジンは Python、`--engine node` で JavaScript に切り替える。
+従来の `pycalc` / `ncalc` は削除し、`calc` に統一した。移行例：
+`pycalc '6*7'` → `calc 6 mul 7`、`ncalc '2**10'` → `calc --engine node 2 pow 10`。
+任意のPython/JavaScript式の実行は受け付けず、数値計算に用途を絞る。
+
+ファイル方式では `OLNM_PY` を設定してから、bash なら次を実行する。
+zsh は最初の行を `eval "$(python3 "$OLNM_PY" init zsh)"` に置き換える。
+
+```sh
+eval "$(python3 "$OLNM_PY" init bash)"
+calc 6 + 7
+calc 6 mul 7
+calc 6 div 4
+calc 2 pow 10
+calc -6 mul 7
+calc 6 minus -7
+calc lpar 6 plus 7 rpar mul 2
+calc --engine node 2 pow 10
+calc --engine node -6 mul 7
+```
+
+順に `13`、`42`、`1.5`、`1024`、`-42`、`13`、`26`、`1024`、`-42`。
+単語は**空白で区切る**。`6mul7` は受け付けない。`calc '6 mul 7'` のような1引数の式も使える。
+
+| 入力する単語 | 演算子・用途 | 例 |
+|---|---|---|
+| `plus` / `minus` | `+` / `-` | `calc 6 minus -7` → `13` |
+| `mul` / `div` | `*` / `/` | `calc 6 mul 7` → `42` |
+| `pow` | `**`（べき乗） | `calc 2 pow 10` → `1024` |
+| `mod` | `%`（剰余） | `calc 7 mod 4` → `3` |
+| `floordiv` | `//`（Pythonのみ） | `calc -7 floordiv 2` → `-4` |
+| `lpar` / `rpar` | `(` / `)` | `calc lpar 6 plus 7 rpar mul 2` → `26` |
+
+`x` や `^` は乗算・べき乗の別名にしない。特に `^` は従来の Python/JS では XOR のため、
+暗黙に意味を変えず `pow` を使う。数値リテラルと四則演算・べき乗・剰余・括弧のみを受け付け、
+関数呼び出し、変数、文字列、コメント、属性参照、代入などは評価前に拒否する。
+不正な入力は stderr に理由を表示して終了コード `1`。`--engine` は式の前に指定する。
+**引数なしの `calc` は式の入力を促す**（端末なら `sqrt(` などを Tab 補完できるプロンプト、パイプなら stdin を1行読む）。
+この経路は引用符もシェル展開も通らないので `6*7`・`sqrt(81)`・`round(pi,2)` をそのまま書け、誤りは案内付きで終了コード `2`。
+
+```sh
+printf '%s\n' '(6+7)*2' | python3 "$OLNM_PY" calc
+```
+
+### シェル登録なし・Python・Node・uv から呼ぶ
+
+```sh
+python3 "$OLNM_PY" calc 6 mul 7
+python3 "$OLNM_PY" calc --engine node 2 pow 10
+```
+
+clone したルートなど、`import olnm` が可能な場所では、Python のコードだけを引用符で囲み、
+**数式は外側の引数として渡せる**。終了コードも引き継ぐ。
+
+```sh
+python3 -c 'import olnm,sys; sys.exit(olnm.calculate(*sys.argv[1:]))' 6 mul 7
+python3 -c 'import olnm,sys; sys.exit(olnm.calculate(*sys.argv[1:], engine="node"))' 2 pow 10
+```
+
+Node から Python エンジンを呼ぶ場合も共通 CLI を使う。`execFileSync` の引数配列なら
+シェルを通さないため、生の `*` も展開されない（コマンドのコード部分の引用符は必要）。
+
+```sh
+node -e 'const {execFileSync}=require("node:child_process"); process.stdout.write(execFileSync("python3",[process.env.OLNM_PY,"calc","6","*","7"],{encoding:"utf8"}))'
+```
+
+uv の各導入手順は後の節を参照。clone したルートでは次が使える。
+
+```sh
+uv run --no-project "$OLNM_PY" calc 6 mul 7
+uvx --from . olnm calc 2 pow 10
+```
+
+`uv tool install .` で登録済みなら `command olnm calc 6 mul 7`。
+利用側プロジェクトで `uv add /絶対パス/OneLinearNumerousMemo` 済みなら
+`uv run olnm calc 6 mul 7` または上記 Python ワンライナーを `uv run python -c ...` で実行する。
+`calc` CLI と `calculate()` は bash を起動せず、Python エンジンは実行中の Python を使う。
+`olnm.run("calc", "6", "mul", "7")` も互換の `run` 経由で利用できる（こちらは bash が必要）。
+
+### シェルの制約と計算エンジンの違い
+
+- `calc 6 * 7` は bash/zsh が関数やCLIを呼ぶ**前**に `*` をファイル名へ展開する。
+  zsh の既定設定では一致しないワイルドカードも `no matches found` になる。
+  `**`、`?`、`[]` にも展開の問題がある。`mul` / `pow` なら設定変更なしで回避できる。
+- `(` / `)`、`;`、`&`、`|`、`<`、`>` はシェルの構文。括弧には `lpar` / `rpar` を使う。
+  `$()`、バッククォート、変数展開も呼び出し前に実行されるので、未信頼の文字列をシェルコードへ貼り付けない。
+  必要なら式全体を `'6 * (7 + 1)'` のように引用するか、APIの引数配列で渡す。
+- `noglob`（zsh）、`set -f`（bash）はグロブだけを抑える。括弧やコマンド置換は抑えられないため、
+  `calc` 自身はグローバルなシェル設定やaliasを変更しない。
+- 演算子の優先順位・精度・出力・実行エラーは指定したエンジンに従う。
+  Python の `calc -2 pow 2` は `-4`、Node は同じ式を構文エラー（終了 `1`）にする。
+  Node では `calc --engine node lpar -2 rpar pow 2` → `4` と明示する。
+- Python の `calc -7 mod 4` は `1`、Node は `-3`。
+  `calc 1 div 0` は終了 `1`、Node は `Infinity` を表示して終了 `0`。
+  Node では `floordiv` / `//` を拒否する（JSではコメントになる）。
+  整数精度も Python と JavaScript Number で異なる。Node 未導入時の終了コードは `127`。
+- 新 `calc` はコード実行につながる構文を拒否するが、サンドボックスではない。
+  入力は4096文字まで。非常に大きなべき乗などのCPU・メモリ使用量は制限しないため、
+  公開サービスで未信頼入力を受ける場合は別途プロセスのリソース制限が必要。
+  関数呼び出しや文字列の評価は移行対象外。必要な場合は `python3 -c` / `node -p` を直接使う。
 
 ## 標準ライブラリツールのデフォルトコマンド
 
@@ -254,7 +359,7 @@ python3 -c 'import olnm; print(olnm.names()[:5])'
 python3 -c 'import olnm; print(len(olnm.entries()))'
 python3 -c 'import olnm; print(olnm.public())'
 python3 -c 'import olnm; print(olnm.read_dial())'
-python3 -c 'import olnm, sys; sys.exit(olnm.run("pycalc", "6*7"))'
+python3 -c 'import olnm, sys; sys.exit(olnm.calculate("6", "mul", "7"))'
 ```
 
 `entries()` / `names()` / `public()` / `read_dial()` は自分では表示しないので `print()` が必要。
@@ -280,12 +385,12 @@ python3 -c 'import os, runpy; m = runpy.run_path(os.environ["OLNM_PY"]); m["like
 ### 出力を文字列として取得／標準入力を渡す
 
 ```sh
-python3 -c 'import os, subprocess, sys; r = subprocess.run([sys.executable, os.environ["OLNM_PY"], "run", "pycalc", "6*7"], text=True, capture_output=True, check=True); print(r.stdout.strip())'
+python3 -c 'import os, subprocess, sys; r = subprocess.run([sys.executable, os.environ["OLNM_PY"], "calc", "6*7"], text=True, capture_output=True, check=True); print(r.stdout.strip())'
 python3 -c 'import os, subprocess, sys; r = subprocess.run([sys.executable, os.environ["OLNM_PY"], "run", "pyjson"], input="{\"answer\":42}", text=True, capture_output=True, check=True); print(r.stdout, end="")'
 ```
 
 引数はリストで渡す。`shell=True` は不要。`run` の引数の空白はそのまま渡る。
-ただし `pycalc` は式を Python コードとして評価するので、自分で書いた式を渡す。
+`calc` / `calculate()` は数値計算のみを受け付ける。
 
 ### 表示なしで一覧データを使う
 
@@ -331,9 +436,9 @@ uv へのスクリプト登録は不要。保存したファイルはすぐ実�
 
 ```sh
 uv run --no-project "$OLNM_PY" ls python
-uv run --no-project "$OLNM_PY" run pycalc '6*7'
+uv run --no-project "$OLNM_PY" calc 6 mul 7
 uv run --no-project "$OLNM_PY" call like '["uvtets"]'
-uv run --no-project --python 3.11 "$OLNM_PY" run pycalc '6*7'
+uv run --no-project --python 3.11 "$OLNM_PY" calc 6 mul 7
 ```
 
 `--no-project` は作業中の別プロジェクトの依存解決を避けるため。
@@ -341,7 +446,7 @@ uv run --no-project --python 3.11 "$OLNM_PY" run pycalc '6*7'
 完全オフラインなら Python も事前に用意する。
 
 ```sh
-uv run --offline --no-project --python 3.11 "$OLNM_PY" run pycalc '6*7'
+uv run --offline --no-project --python 3.11 "$OLNM_PY" calc 6 mul 7
 ```
 
 `--offline` は **uv の通信**を止める。実行する関数や API の通信まで止めるものではない。
@@ -349,7 +454,7 @@ uv run --offline --no-project --python 3.11 "$OLNM_PY" run pycalc '6*7'
 
 ```sh
 eval "$(uv run --no-project "$OLNM_PY" init bash)"
-pycalc '6*7'
+calc 6 mul 7
 ```
 
 登録されたシェル関数の内部は python3 を呼ぶので、`command -v python3` でも存在を確認する。
@@ -372,7 +477,7 @@ update-shell の案内に従いターミナルを開き直して PATH を反映�
 ```sh
 olnm --help
 olnm ls python
-olnm run pycalc '6*7'
+olnm calc 6 mul 7
 olnm call like '["uvtets"]'
 ```
 
@@ -387,7 +492,7 @@ clone なしで導入する場合：
 
 ```sh
 uv tool install 'git+https://github.com/myon-bioinformatics/OneLinearNumerousMemo.git@main'
-olnm run pycalc '6*7'
+olnm calc 6 mul 7
 ```
 
 PyPI の同名パッケージを仮定せず、このリポジトリを指定する。
@@ -398,7 +503,7 @@ PyPI の同名パッケージを仮定せず、このリポジトリを指定す
 ローカルソースはリポジトリルートで：
 
 ```sh
-uvx --from . olnm run pycalc '6*7'
+uvx --from . olnm calc 6 mul 7
 uvx --from . olnm call like '["uvtets"]'
 ```
 
@@ -412,14 +517,14 @@ uvx --from 'git+https://github.com/myon-bioinformatics/OneLinearNumerousMemo.git
 
 ```sh
 eval "$(olnm init bash)"
-pycalc '6*7'
+calc 6 mul 7
 olnm python
 ```
 
 ここから `olnm` は**シェル関数**になる。従来の `olnm python` など分類名1語は一覧表示を保ち、`olnm run ...` / `olnm calc` / `olnm tools` などの CLI も呼べる。分類名と衝突する場合を含め、インストール済み CLI を確実に呼ぶには `command olnm`。
 
 ```sh
-command olnm run pycalc '6*7'
+command olnm calc 6 mul 7
 command olnm call like '["uvtets"]'
 ```
 
@@ -457,7 +562,7 @@ uv init --bare --python 3.11 olnm-demo
 cd olnm-demo
 uv add "$OLNM_SOURCE"
 uv run python -c 'import olnm; olnm.like("uvtets")'
-uv run python -c 'import olnm, sys; sys.exit(olnm.run("pycalc", "6*7"))'
+uv run python -c 'import olnm, sys; sys.exit(olnm.calculate("6", "mul", "7"))'
 uv run olnm call names
 ```
 
@@ -549,7 +654,8 @@ run は呼び出し元の cwd を引き継ぐ。
 | mise | `python3 "$OLNM_PY" mise exec node@26 -- node -v`（argv を mise へ転送） |
 | yourself | `python3 "$OLNM_PY" yourself --minimal --format json`（登録不要の同梱版） |
 | dial | `python3 "$OLNM_PY" dial` / `dial 0`（設定変更） |
-| run | `python3 "$OLNM_PY" run pycalc '2**10'` |
+| calc | `python3 "$OLNM_PY" calc 2 pow 10` |
+| run | `python3 "$OLNM_PY" run pyjson` |
 | call | `python3 "$OLNM_PY" call like '["uvtets"]' --kwargs '{"n":2}'` |
 | hub | `python3 "$OLNM_PY" hub --help`。次節に全件 |
 
@@ -590,7 +696,7 @@ forge がある状態で dial を変えると、登録済み repo の origin と
   export OLNM_HOME="$(mktemp -d)"
   export DIAL_FILE="$OLNM_HOME/dial"
   python3 "$OLNM_PY" dial 0
-  python3 "$OLNM_PY" run pycalc '6*7'
+  python3 "$OLNM_PY" calc 6 mul 7
   python3 "$OLNM_PY" run myip
 )
 ```
@@ -737,12 +843,12 @@ uvoffline は wheels があればそこから install、なければ uv sync --o
 ファイル方式の OLNM_PY を設定済みとして実行する。node を bun に変えても使える。
 
 ```sh
-node -e 'const {execFileSync}=require("node:child_process"); process.stdout.write(execFileSync("python3",[process.env.OLNM_PY,"run","pycalc","6*7"],{encoding:"utf8"}))'
+node -e 'const {execFileSync}=require("node:child_process"); process.stdout.write(execFileSync("python3",[process.env.OLNM_PY,"calc","6*7"],{encoding:"utf8"}))'
 node -e 'const {execFileSync}=require("node:child_process"); const rows=JSON.parse(execFileSync("python3",[process.env.OLNM_PY,"call","names"],{encoding:"utf8"})); console.log(rows.length)'
 ```
 
-ツール方式なら `execFileSync("olnm", ["run", "pycalc", "6*7"], ...)`。
-uv 経由なら `execFileSync("uv", ["run", "--no-project", process.env.OLNM_PY, "run", "pycalc", "6*7"], ...)`。
+ツール方式なら `execFileSync("olnm", ["calc", "6*7"], ...)`。
+uv 経由なら `execFileSync("uv", ["run", "--no-project", process.env.OLNM_PY, "calc", "6*7"], ...)`。
 
 ## 入力支援：Tab・タイポ・引用符なしの計算
 
@@ -755,7 +861,7 @@ bash/zsh へ最新の定義を読み込む。zsh は先に `autoload -Uz compini
 | 入力位置 | 候補 |
 |---|---|
 | `olnm ru<Tab>` | `run` |
-| `olnm run pyc<Tab>` | `pycalc` / `pyclean` / `pycsv` |
+| `olnm run pyc<Tab>` | `pyclean` / `pycsv` |
 | `olnm ls py<Tab>` | `python` |
 | `hubdial issue <Tab>` | `ls` / `new` |
 | `hubdial install --flavor <Tab>` | `forgejo` / `gitea` |
@@ -786,7 +892,7 @@ python3 "$OLNM_PY" calc
 ```
 
 期待値は `26`。`*` や括弧をシェルが解釈しないため、外側の引用符は不要。
-eval 後なら `olnm calc` または引数なしの `pycalc` でも同じ入力モードへ入る。
+eval 後なら `olnm calc` または引数なしの `calc` でも同じ入力モードへ入る。
 readline が利用できれば、プロンプト内の `sq<Tab>` が `sqrt(` に補完され、矢印キーで編集できる。
 readline は任意の標準ライブラリ機能で、ない場合も通常の入力はできる。
 
@@ -798,9 +904,9 @@ python3 "$OLNM_PY" calc '(6+7)*2'
 printf '%s\n' '(6+7)*2' | python3 "$OLNM_PY" calc
 ```
 
-新しい calc は四則演算・`// % **`、`pi/e/tau`、`sqrt/sin/cos/tan/log/log2/log10/exp/ceil/floor/abs/round/min/max` に限定する。
+入力モード（引数なし）の calc は四則演算・`// % **`、`pi/e/tau`、`sqrt/sin/cos/tan/log/log2/log10/exp/ceil/floor/abs/round/min/max` に限定する。
 文・import・属性参照・文字列は受け付けず、式長1000字・構文128ノード・整数4096bit・指数絶対値1000まで。
-計算式の誤りは理由と再入力例を stderr に示して終了2。既存の引数あり `pycalc '...'` は互換性のため従来の Python 式評価を保ち、信頼できる式だけに使う。
+計算式の誤りは理由と再入力例を stderr に示して終了2。引数ありの `calc` は[前の節](#引用符を省略して計算する)の数値計算（関数・定数は使えない、誤りは終了1）。
 
 ## mise：複数言語の共通入口
 
@@ -908,7 +1014,7 @@ command -v node npm npx bun rustc cargo rustup
 
 `tools` は PATH 上の有無・見つかったパス・公式の導入先・作業フォルダの扱いを表示する。自動インストールや設定変更はしない。
 Node/Bun 関数の呼び出し時にも、不足した実行環境を確認して具体的な案内を表示し、終了127となる。
-例: `run ncalc '6*7'` に Node がなければ Node の案内。`run bi` に Bun がなければ Bun の案内。
+例: `run njson` に Node がなければ Node の案内。`run bi` に Bun がなければ Bun の案内。
 呼ぶたびに確認するため、同じターミナルの PATH に追加した後は定義の再読み込みは不要。
 `nclean` は npm 不在時に node_modules やロックを消さず停止する。
 
@@ -957,8 +1063,8 @@ uv の Python 環境に Node/Bun/Rust が自動で含まれるわけでもない
 | uv tool install olnm.py が失敗 | pyproject.toml を含むディレクトリ／Git URL を指定。単一ファイルは uv run |
 | olnm が見つからない | ツール方式は uv tool list / uv tool update-shell。シェル方式はそのターミナルで eval |
 | olnm run ... で no section | 古いシェル定義なら再度 init を eval。インストール済み CLI は `command olnm run ...` |
-| pycalc が見つからない | eval 未実行なら `python3 "$OLNM_PY" run pycalc '6*7'` |
-| call pycalc が失敗 | シェル関数は run。Python API は call public で確認 |
+| pycalc / ncalc が見つからない | `calc` へ統一。`python3 "$OLNM_PY" calc 6 mul 7` |
+| call calc が失敗 | CLIは `calc`、Python APIは `calculate`。`call calculate` も利用可 |
 | JSON parse error | 配列／オブジェクトをシングルクォートで囲む。true は小文字。stderr を stdout に結合しない |
 | --locked で失敗 | 利用側の cwd と uv.lock を確認。初回 uv sync、変更後 uv lock |
 | ruff がない | 利用側で uv add --dev ruff。uvcheck は自動導入しない |
@@ -977,10 +1083,13 @@ python3 -m unittest discover -s tests -v
 ```
 
 forge 本体の代わりに tests/fake_forgejo.py で CLI / REST を代行し、dial・Git remote・Issue・PR・mirror 登録を確認する。
-実際の forge 取得、外部サービスへの push、全 247 関数の副作用を伴う実行はこのテストでは行わない。
+実際の forge 取得、外部サービスへの push、全 246 関数の副作用を伴う実行はこのテストでは行わない。
 全関数の定義・名前の一意性、全 CLI 階層のヘルプ、代表例の実出力・終了コードを確認する。
-Python ワンライナー、JSON、stdin、空白やシェル特殊文字を含むパス、uv の導入経路も確認する。
+Python ワンライナー、Node の引数配列、JSON、stdin、空白を含むパス、uv の導入経路も確認する。
 追加の入力支援テストは bash / zsh の補完登録と候補、疑似端末での式入力と Tab、タイポ候補、不正JSON、Node/Bun不在時の案内を確認する。zsh / readline がない環境では該当ケースのみ skip。
+計算テストは bash/zsh の双方で実ファイルに一致するグロブ、空白、乗除算、べき乗、負数、
+不正コードの拒否、エンジン別の出力と終了コードを確認する。
+CIでは Python 3.11 / 3.15、Node 26、uv latest、Ubuntu 24.04、bash/zsh で全テストを実行する。
 
 uv の install / uvx / uv add / 再インストール / uninstall を実際に試す場合：
 
@@ -1047,7 +1156,8 @@ Path の戻り値は CLI call で JSON 文字列、戻り値なしは null と�
 | `net() -> list[str]` | `olnm.net()` | `net` | Names that need internet (🌍). |
 | `public() -> list[str]` | `print(olnm.public())` | `public` | Names callable through `call`. |
 | `read_dial(default: int = 3) -> int` | `print(olnm.read_dial())` | `read_dial` | Current dial (0..3); unset = 3 (plain online box). |
-| `run(name: str, *args: str) -> int` | `raise SystemExit(olnm.run("pycalc", "6*7"))` | run サブコマンドを使う | Run one one-liner in a non-interactive bash (for Node / Bun / Python callers). |
+| `calculate(*args: str, engine: str = "python") -> int` | `olnm.calculate("6", "mul", "7")` | `olnm calc 6 mul 7` | 数値計算を表示し、エンジンの終了コードを返す。bash不要。 |
+| `run(name: str, *args: str) -> int` | `raise SystemExit(olnm.run("calc", "6", "mul", "7"))` | run サブコマンドを使う | Run one one-liner in a non-interactive bash (for Node / Bun / Python callers). |
 | `xprobe(*args: str) -> int` | `raise SystemExit(olnm.xprobe("--help"))` | xprobe サブコマンドを使う | 固定コミットの単一ファイルツールをuvのキャッシュ経由で実行。 |
 | `cli_args(*args: str) -> int` | `raise SystemExit(olnm.cli_args("--help"))` | cli_args サブコマンドを使う | 固定コミットの単一ファイルツールをuvのキャッシュ経由で実行。 |
 | `ghi(*args: str) -> int` | `raise SystemExit(olnm.ghi("--help"))` | ghi サブコマンドを使う | 固定コミットの単一ファイルツールをuvのキャッシュ経由で実行。 |
@@ -1113,7 +1223,7 @@ Path の戻り値は CLI call で JSON 文字列、戻り値なしは null と�
 | `markdown` | 📦 single-file Markdown stdio CLI via uv's cached tool environment |
 | `ascii_artist` | 📦 single-file ASCII CLI via uv's cached tool environment |
 | `yourself` | 🧾 bundled standard-library environment report; no separate file or registration |
-| `pycalc` | 🧮 evaluate math expression (pycalc '2**10') |
+| `calc` | 🧮 共通の数値計算（`calc 6 mul 7`、`calc --engine node 2 pow 10`） |
 | `pyimp` | 📥 check if module is importable and where (pyimp numpy) |
 | `pymods` | 📦 list top-level importable third-party modules |
 | `pytest1` | 🧪 run unittest discover with plain python |
@@ -1140,7 +1250,6 @@ Path の戻り値は CLI call で JSON 文字列、戻り値なしは null と�
 | `nwhy` | 📦 why is a package installed (nwhy lodash) |
 | `ninfo` | 🔢 🌍 show latest versions of a package (ninfo react) |
 | `njson` | 📐 pretty-print json via node |
-| `ncalc` | 🧮 evaluate JS expression (ncalc '2**10') |
 | `nhttp` | 🌐 serve current dir with node stdlib only (nhttp [port=3000]) |
 | `nlts` | 🟩 🌍 install/use Node LTS via nvm or fnm if present |
 
