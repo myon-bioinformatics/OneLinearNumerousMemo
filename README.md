@@ -6,6 +6,9 @@ Python 3.11 以降、Linux（Ubuntu / WSL の Ubuntu）の bash/zsh を対象と
 macOS では GNU コマンドとの差異があり、PowerShell/cmd からシェル関数を使う場合は WSL 内で実行する。
 Node / Bun / gh / Docker / fzf などは、それを使う関数を実行するときだけ必要。
 
+
+利用手順の切り替え・再現記録: [olnm 利用・検証ガイド](https://myon-bioinformatics.github.io/OneLinearNumerousMemo/)
+
 ## 目次
 
 - [最初の成功まで](#最初の成功まで)
