@@ -92,7 +92,7 @@ uvupall() { uv lock --upgrade && uv sync; }
 # 🆕 uvinit: new project in current dir (uvinit [name])
 uvinit() { uv init ${1:+--name "$1"} && uv sync; }
 # ➕ uvadd: 🌍 add package(s) and sync
-uvadd() { uv add "$@" && uv sync; }
+uvadd() { uv add "$@"; }
 # ➕ uvdev: 🌍 add dev package(s)
 uvdev() { uv add --dev "$@"; }
 # 🐍 uvpy: python REPL inside locked env
@@ -106,7 +106,7 @@ uvbuild() { uv build "$@"; }
 # 🔁 uvresync: 🌍 delete lock and resolve from scratch
 uvresync() { rm -f uv.lock && uv lock && uv sync; }
 # 🐍 uvpys: list / 🌍 install pythons (uvpys 3.13)
-uvpys() { [ -n "$1" ] && uv python install "$1" || uv python list --only-installed; }
+uvpys() { if [ "$#" -gt 0 ]; then uv python install "$@"; else uv python list --only-installed; fi; }
 
 # ───────────────────────── 🐍 python ─────────────────────────
 # 🐍 pyv: python version + path
@@ -328,7 +328,7 @@ touchp() { mkdir -p "$(dirname "$1")" && touch "$1"; }
 
 # ───────────────────────── 🔤 text ─────────────────────────
 # 📐 jsonf: pretty-print json (jq → python fallback)
-jsonf() { command -v jq >/dev/null && jq . "$@" || python3 -m json.tool "$@"; }
+jsonf() { if command -v jq >/dev/null; then jq . "$@"; else pyjson "$@"; fi; }
 # 📐 jsonmin: minify json
 jsonmin() { command -v jq >/dev/null && jq -c . "$@" || python3 -c 'import json,sys;print(json.dumps(json.load(sys.stdin),separators=(",",":")))'; }
 # 🔁 y2j: 🌍(first run) yaml → json via uvx pyyaml
@@ -462,9 +462,9 @@ alias1() { printf '# ⭐ %s: %s\n%s() { %s "$@"; }\n' "$1" "$2" "$1" "$2"; }
 # 📦 uvexport: pin lock to requirements.txt (hashes) for hand-off
 uvexport() { uv export --frozen --no-dev --format requirements-txt -o requirements.txt && wc -l requirements.txt; }
 # 🎒 uvbundle: 🌍 build wheels/ from lock for carrying into a closed network (run online side)
-uvbundle() { uvexport && mkdir -p wheels && uv pip download -r requirements.txt -d wheels 2>/dev/null || python3 -m pip download -r requirements.txt -d wheels; ls wheels | wc -l; }
+uvbundle() { uvexport && mkdir -p wheels && uv tool run --from pip pip download -r requirements.txt -d wheels && find wheels -maxdepth 1 -type f | wc -l; }
 # 🔌 uvoffline: sync from cache/wheels without network
-uvoffline() { [ -d wheels ] && uv pip install --no-index --find-links wheels -r requirements.txt || uv sync --offline; }
+uvoffline() { if [ -d wheels ]; then uv pip install --no-index --find-links wheels -r requirements.txt; else uv sync --offline; fi; }
 # 🔌 pipoffline: pip install from local wheels/ only
 pipoffline() { python3 -m pip install --no-index --find-links "${1:-wheels}" -r "${2:-requirements.txt}"; }
 # 🎒 nbundle: 🌍 fill a portable npm cache dir (.npm-cache) for offline `nci`
@@ -502,7 +502,7 @@ cabundle() { [ -f "$1" ] || { echo "file?"; return 1; }; export SSL_CERT_FILE="$
 # 🧾 envreport: snapshot of toolchain + lock hashes → env-report.txt (evidence for reviews)
 envreport() { { echo "# $(date -Iseconds) $(hostname)"; sysinfo; ver; for f in uv.lock package-lock.json bun.lock requirements.txt; do [ -f "$f" ] && sha256sum "$f"; done; } | tee env-report.txt; }
 # 🧾 licenses: list licenses of installed python packages (stdlib metadata only)
-licenses() { python3 -c 'import importlib.metadata as m;[print(f"{d.metadata["Name"]:30} {d.version:12} {(d.metadata.get("License-Expression") or d.metadata.get("License") or "?")[:40]}") for d in sorted(m.distributions(),key=lambda d:d.metadata["Name"].lower())]'; }
+licenses() { python3 -c 'import importlib.metadata as m; [print("{:<30} {:<12} {}".format(d.metadata.get("Name", "?"), d.version, (d.metadata.get("License-Expression") or d.metadata.get("License") or "?")[:40])) for d in sorted(m.distributions(), key=lambda d: (d.metadata.get("Name") or "").lower())]'; }
 # 📋 pyfreeze: pip freeze of current interpreter (uv env if present)
 pyfreeze() { uv pip freeze 2>/dev/null || python3 -m pip freeze; }
 
@@ -1467,9 +1467,70 @@ def run(name: str, *args: str) -> int:
 
 
 def doctor() -> dict:
-    """Optional tools on PATH, the dial, and the forge if set up."""
+    """Inspect tools and old olnm shell configuration without changing anything."""
     res = {t: bool(shutil.which(t)) for t in TOOLS}
     print(" ".join(("✅ " if v else "❌ ") + k for k, v in res.items()))
+    print(f"Python running olnm: {sys.version.split()[0]} ({sys.executable})")
+    print(f"python3 on PATH: {shutil.which('python3') or 'not found'}\nolnm module: {PY}")
+    for runtime in ("uv", "mise", "node", "bun", "go", "rustc"):
+        path = shutil.which(runtime)
+        if not path:
+            print(f"{runtime}: not found on PATH")
+            continue
+        try:
+            version = subprocess.run([path, "version" if runtime == "go" else "--version"],
+                                     capture_output=True, text=True, timeout=5)
+            line = version.stdout.strip().splitlines()
+            print(f"{runtime}: {line[0] if version.returncode == 0 and line else 'version unavailable'} ({path})")
+        except (OSError, subprocess.TimeoutExpired):
+            print(f"{runtime}: version unavailable ({path})")
+    executable = shutil.which("olnm")
+    print(f"olnm on PATH: {executable or 'not found'}")
+    print("Shell aliases/functions can shadow this executable; check with: type -a olnm")
+    variables = sorted(k for k in os.environ if k.startswith("OLNM_") or k == "DIAL_FILE")
+    print("Environment variable names (values hidden): " + (", ".join(variables) or "none"))
+    pattern = re.compile(r"\bOLNM_[A-Za-z0-9_]*\b|\bDIAL_FILE\b|\.olnm\.py|\bolnm(?:_\w+)?\b", re.I)
+    found = False
+    for path in (Path.home() / n for n in (".bashrc", ".bash_profile", ".profile", ".zshrc", ".zprofile")):
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            print(f"Cannot inspect {path}: {exc.strerror}")
+            continue
+        for number, line in enumerate(lines, 1):
+            if line.strip() and not line.lstrip().startswith("#") and pattern.search(line):
+                print(f"Possible old setting: {path}:{number} (content hidden)")
+                found = True
+    if not found:
+        print("No matching active lines in the checked shell startup files.")
+    for path in (Path.home() / ".olnm.py", Path.home() / ".olnm"):
+        if path.exists():
+            print(f"Existing file or data: {path}")
+    if res["uv"]:
+        try:
+            pythons = subprocess.run(["uv", "python", "list", "--only-installed", "--managed-python"], capture_output=True, text=True, timeout=10)
+            if pythons.returncode:
+                print("Could not list uv-managed Python versions; run 'uv python list --only-installed --managed-python'.")
+            else:
+                print("uv-managed Python versions:\n" + (pythons.stdout.strip() or "  none installed"))
+        except (OSError, subprocess.TimeoutExpired):
+            print("Could not inspect uv-managed Python versions; run 'uv python list --only-installed --managed-python'.")
+        try:
+            result = subprocess.run(["uv", "tool", "list"], capture_output=True, text=True, timeout=10)
+            if result.returncode:
+                print("uv tool list failed; run 'uv tool list' to inspect the error.")
+            elif re.search(r"(?m)^one-linear-numerous-memo\s", result.stdout):
+                print("uv tool: one-linear-numerous-memo is installed; update with: uv tool upgrade one-linear-numerous-memo")
+            else:
+                print("uv tool: one-linear-numerous-memo was not listed; install with: uv tool install 'git+https://github.com/myon-bioinformatics/OneLinearNumerousMemo.git@main'")
+        except (OSError, subprocess.TimeoutExpired):
+            print("Could not inspect uv tools; run 'uv tool list' manually.")
+    else:
+        print("uv is unavailable on PATH; install uv before installing the olnm tool.")
+    print("Review matching startup lines, then open a new shell; run 'uv tool update-shell' if olnm is not on PATH.")
+    print("This check cannot see the parent shell's aliases/functions or files sourced indirectly; it does not delete or modify anything.")
     dial()
     if FSTATE.exists():
         hub_status()
