@@ -279,7 +279,7 @@ Node/Bun側のargv配列も `[OLNM_PY, 'xprobe', '--help']` のようにする�
 stdout / stderr / stdin / cwd / 終了コードは供給元へ引き継ぎ、シェル文字列として再解釈しない。
 `call xprobe` 等では実行出力と戻り値JSONが混じるため、直接CLI/APIを使う。
 
-olnm の dial 0/1 では uv に `--offline` を付け、取得済みキャッシュだけを使用する。未取得のツールは失敗する。
+olnm の dial が offline / local のときは uv に `--offline` を付け、取得済みキャッシュだけを使用する。未取得のツールは失敗する。
 uvのoffline指定は子ツールの通信を遮断しない。ghiのAPI操作等は供給元の仕様に従う。
 採用コミットは `_STDLIB_TOOLS` に完全SHAで固定し、olnm更新時に検証済みの版へ更新する。
 供給元6リポジトリのuv配布PRはmainへ統合済み。検証したmainの完全SHAを採用し、更新時にも取得・実行テストを行う。
@@ -649,17 +649,17 @@ run は呼び出し元の cwd を引き継ぐ。
 | net | `python3 "$OLNM_PY" net`（🌍 の関数名） |
 | doctor | `python3 "$OLNM_PY" doctor`（任意ツールの欠如も表示） |
 | calc | `python3 "$OLNM_PY" calc`（式を対話入力）、`calc 6 + 7`、stdin からも入力可 |
-| complete | `python3 "$OLNM_PY" complete -- olnm hub install --flavor ""`（候補を改行区切りで表示） |
+| complete | `python3 "$OLNM_PY" complete -- olnm dial ""`（候補を改行区切りで表示） |
 | tools | `python3 "$OLNM_PY" tools` / `tools mise` / `tools node` / `tools bun` / `tools go` / `tools rust`（存在確認と導入案内のみ） |
 | mise | `python3 "$OLNM_PY" mise exec node@26 -- node -v`（argv を mise へ転送） |
 | yourself | `python3 "$OLNM_PY" yourself --minimal --format json`（登録不要の同梱版） |
-| dial | `python3 "$OLNM_PY" dial` / `dial 0`（設定変更） |
+| dial | `python3 "$OLNM_PY" dial` / `dial offline`（設定変更。local / mirror / github、0〜3 も可） |
 | calc | `python3 "$OLNM_PY" calc 2 pow 10` |
 | run | `python3 "$OLNM_PY" run pyjson` |
 | call | `python3 "$OLNM_PY" call like '["uvtets"]' --kwargs '{"n":2}'` |
-| hub | `python3 "$OLNM_PY" hub --help`。次節に全件 |
+| hub | `python3 "$OLNM_PY" hub --help`。`nagoyaction forge` へ転送。次節に全件 |
 
-`hub repo add --help` / `hub issue new --help` / `hub pr new --help` まで個別ヘルプがある。
+NagoyAction 導入後は `hub repo add --help` / `hub issue new --help` / `hub pr new --help` まで個別ヘルプがある（`nagoyaction forge …` のヘルプ）。
 終了コードは通常成功 0、構文エラー 2、未知の run 関数 127。
 候補なしの通常 like は 0、like --hint は候補なしなら 127。
 run は子コマンドの終了コードを返す。call の数値の戻り値は JSON データであり、終了コードではない。
@@ -675,37 +675,46 @@ Node、Bun、Go、Rust、uv、mise は PATH 上の実行ファイルとバージ
 
 ## ダイヤルと保存先
 
-`local-forge`（NagoyAction）が PATH にある場合、`olnm hub ...` はそのコマンドに引数と終了コードをそのまま引き渡す。既存 forge の状態がある場合、`olnm dial` も同じツールに委譲する。未導入なら従来の内蔵実装を使う。両方は同じ `OLNM_HOME` / `DIAL_FILE` を参照するため、移行作業中は片方ずつ操作する。
+ダイヤルは名前で指定する：`offline` / `local` / `mirror` / `github`。表示は名前が先で、保存値の数字を後ろに付ける（例 `🔁 mirror (2)`）。
+`DIAL_FILE` には従来どおり数字 0〜3 を保存するため、既存の読み手はそのまま動く。`dial 2` のような数字指定も使える。
+綴りを誤ると `did you mean: mirror?` を表示し、ダイヤルは変えない。
+
+ローカル forge は NagoyAction へ移った。`olnm hub ...` は `nagoyaction forge ...` に引数と終了コードをそのまま引き渡す。
+forge の状態（`$OLNM_HOME/forge/state.json`）がある場合、`olnm dial` の変更も `nagoyaction forge dial` に任せる。NagoyAction は origin と forge を動かしてから同じ `DIAL_FILE` を書く。
+forge があるのに NagoyAction が見つからない場合、olnm は `dial unchanged` と導入方法を表示して終了コード 127 で止まる。origin だけが古い接続先を指したまま push しないため。
+forge がなければ olnm 自身が `DIAL_FILE` を読み書きする。表示は NagoyAction と同じ。
 
 `OLNM_HOME`（既定 `~/.olnm`）、`DIAL_FILE`（既定 `$OLNM_HOME/dial`）は **Python の起動／import 前**に設定する。
-ダイヤル未設定時は 3。
+ダイヤル未設定時は github（3）。
 
-| 値 | 🌍 付きシェル関数 | 🎛️ 関数（ghpr ghprs ghis ghisn ghweb） | origin（gp / gpl） | forge |
+| 名前（保存値） | 🌍 付きシェル関数 | 🎛️ 関数（ghpr ghprs ghis ghisn ghweb） | origin（gp / gpl） | forge |
 |---|---|---|---|---|
-| 0 🔌 offline | 停止するスタブ | forge 登録済みならローカルへ | bare | 停止 |
-| 1 🏠 local | 停止するスタブ | forge 登録済みならローカルへ | ローカル forge | 起動 |
-| 2 🔁 mirror | 実行可能 | forge 登録済みならローカルへ | ローカル forge | 起動・GitHub へ mirror |
-| 3 ☁️ github | 実行可能 | gh へ | GitHub | 起動（バックアップ） |
+| 🔌 offline (0) | 停止するスタブ | forge 登録済みならローカルへ | bare | 停止 |
+| 🏠 local (1) | 停止するスタブ | forge 登録済みならローカルへ | ローカル forge | 起動 |
+| 🔁 mirror (2) | 実行可能 | forge 登録済みならローカルへ | ローカル forge | 起動・GitHub へ mirror |
+| ☁️ github (3) | 実行可能 | gh へ | GitHub | 起動（バックアップ） |
 
 通信を OS レベルで遮断する機能ではない。🌍 なしの関数や Python API の直呼びも遮断しない。
 forge 未初期化時は 🎛️ 関数が gh に進む場合もある。
 forge がある状態で dial を変えると、登録済み repo の origin と forge 起動状態も変わる。
 
-**普段の状態を変更せず dial 0 を試す：**
+**普段の状態を変更せず offline を試す：**
 
 ```sh
 (
   export OLNM_HOME="$(mktemp -d)"
   export DIAL_FILE="$OLNM_HOME/dial"
-  python3 "$OLNM_PY" dial 0
+  python3 "$OLNM_PY" dial offline
   python3 "$OLNM_PY" calc 6 mul 7
   python3 "$OLNM_PY" run myip
 )
 ```
 
-期待値は 42 と `myip: ... needs dial ≥2`。最後の終了コードは 1。
-読込後にダイヤルを変えるなら `olnm_dial 0` で関数も再登録される。
-Python の `olnm.dial(0)` や CLI の dial 0 は親シェルを再読込しないので、続けて `olnm_reload` が必要。
+期待値は 42 と `myip: 🌍 needs dial mirror or github (now 🔌 offline)`。最後の終了コードは 1。
+読込後にダイヤルを変えるなら `olnm_dial offline` で関数も再登録される。
+Python の `olnm.dial("offline")` や CLI の `dial offline` は親シェルを再読込しないので、続けて `olnm_reload` が必要。
+
+forge 関連の保存物は NagoyAction が作り、同じ場所を使い続ける。
 
 | 保存物 | 既定の場所 |
 |---|---|
@@ -719,9 +728,22 @@ Python の `olnm.dial(0)` や CLI の dial 0 は親シェルを再読込しな�
 
 ## hub の導入から Issue・PR 作成まで
 
+forge の管理は [NagoyAction](https://github.com/myon-bioinformatics/NagoyAction) の `nagoyaction forge` が担う。olnm の `hub` はそこへ引数と終了コードを転送するだけで、forge のコードは持たない。
+先に NagoyAction を uv ツールとして入れる（標準ライブラリのみ、実行時依存なし）：
+
+```bash
+git clone https://github.com/myon-bioinformatics/NagoyAction
+cd NagoyAction
+python3 tools/build_uv_tool.py build/nagoyaction-tool
+uv tool install ./build/nagoyaction-tool
+nagoyaction forge --help
+```
+
+導入せずに clone だけ使う場合は `export NAGOYACTION=/path/to/NagoyAction/nagoyaction.py` を設定する（閉域網へ持ち込んだ `local_forge.py` も指定できる。後述）。どちらもない状態で `olnm hub ...` を実行すると、この導入方法を表示して終了コード 127 で止まる。
+
 Gitea（既定）または Forgejo の Linux バイナリが必要。Go は不要。
 **通常ユーザーで実行する。** forge 本体は root 起動できない。
-以下はシェル関数未登録でも使える CLI 方式。`hubdial ...` は `python3 "$OLNM_PY" hub ...` の短縮関数。
+以下はシェル関数未登録でも使える CLI 方式。`python3 "$OLNM_PY" hub ...` は `nagoyaction forge ...` と同じで、`hubdial ...` はその短縮関数。
 
 ### 導入 → 起動 → repo 登録
 
@@ -754,7 +776,7 @@ python3 "$OLNM_PY" hub issue ls
 ```
 
 repo add は local / bare / origin を設定する。GitHub にも紐付ける場合だけ `--github owner/name` を付ける。
-その値は自分の実在する repo に置換する。dial 2 以降の sync / mirror は GitHub へ push する。
+その値は自分の実在する repo に置換する。mirror / github の sync / mirror は GitHub へ push する。
 
 ### ブランチ → PR
 
@@ -773,24 +795,23 @@ PR 作成は作業ブランチを local へ先に push する。base の main �
 Issue / PR / labels の対象は cwd の登録済み repo。repo ls は全登録一覧。
 読込済みなら `ghisn 'crash' bug` / `ghis` / `ghpr 'fix demo'` も使える。
 
-### Python / JSON から hub
+### Python から hub
 
-導入・起動・repo 登録後、その repo で実行する。
-Python 直呼びには、その Python 環境への導入または import パス設定も必要。
+導入・起動・repo 登録後、その repo で実行する。forge の関数は olnm ではなく NagoyAction 側にある。
+`nagoyaction.forge(...)` は CLI と同じ引数を受け取り、終了コードを返す。NagoyAction の clone を import パスに置くか、その uv ツール環境の Python で実行する。
 
-```sh
-python3 "$OLNM_PY" call hub_repo_ls
-python3 "$OLNM_PY" call hub_issue_new '["crash"]' --kwargs '{"body":"再現手順","labels":["bug"],"path":"."}'
-python3 "$OLNM_PY" call hub_issue_ls --kwargs '{"path":".","state":"all"}'
-python3 "$OLNM_PY" call hub_api '["GET","/user/repos"]'
-python3 -c 'import olnm; olnm.hub_issue_new("crash", body="再現手順", labels=["bug"], path=".")'
+```bash
+python3 -c 'import nagoyaction; raise SystemExit(nagoyaction.forge("issue", "new", "crash", "--body", "再現手順", "--label", "bug"))'
+python3 -c 'import nagoyaction; raise SystemExit(nagoyaction.forge("dial", "mirror"))'
+python3 -c 'import local_forge; print(local_forge.hub_repo_ls())'
 ```
 
-`call hub_init` の JSON はトークン・パスワードを含む状態データなので、共有ログに保存しない。
+olnm 側に残る forge 関連の API は `hub_url()`（状態ファイルの port から URL を返すだけ）と、ダイヤルの `dial` / `dial_level` / `dial_label` / `read_dial`。
+`local_forge.hub_init()` の戻り値はトークン・パスワードを含む状態データなので、共有ログに保存しない。
 
 ### hub サブコマンド全件
 
-以下は `python3 "$OLNM_PY" hub` に続ける。
+以下は `nagoyaction forge`（または同じものを転送する `python3 "$OLNM_PY" hub`）に続ける。olnm は最初の語だけを確認し、未知の語には候補を出す。それ以降の解釈とタイポ候補は NagoyAction が行う。
 
 | 入口 | 引数・例 | 前提／副作用 |
 |---|---|---|
@@ -800,7 +821,7 @@ python3 -c 'import olnm; olnm.hub_issue_new("crash", body="再現手順", labels
 | up / down | 引数なし | 起動／停止 |
 | status / doctor | 引数なし | doctor は GitHub 到達性も確認 |
 | logs | `-n 80` | ログ末尾 |
-| dial | 引数なし／0 / 1 / 2 / 3 | 通常の dial と同じ |
+| dial | 引数なし／offline / local / mirror / github（0〜3 も可） | 通常の dial と同じ。表示は `🔁 mirror (2)` |
 | repo add | `. --github owner/name --public` | --public 省略時 private |
 | repo ls / repo rm | `ls` / `rm .` | rm は登録解除のみ。データ・remote は残る |
 | api | `GET /user/repos` / `POST /user/repos --data '{"name":"demo"}'` | GET / POST / PATCH / PUT / DELETE。path は /api/v1 より後 |
@@ -809,11 +830,11 @@ python3 -c 'import olnm; olnm.hub_issue_new("crash", body="再現手順", labels
 | pr ls | 引数なし | cwd の open PR |
 | pr new | `'title' --head fix-demo --base main --body 'text'` | --head 省略時は現在ブランチ |
 | labels | 引数なし | GitHub 既定ラベルを追加 |
-| sync | 引数なし | 全登録を bare / local /（dial ≥2 なら）github へ push |
+| sync | 引数なし | 全登録を bare / local /（mirror / github なら）github へ push |
 
 install / bundle の --flavor は gitea / forgejo。Forgejo は Codeberg、Gitea は GitHub 等から取得する。
 install は最新を問い合わせ、問い合わせが塞がれた Gitea 環境ではコード内の VERIFIED（1.27.3）にフォールバック。
-固定版なら --version 1.27.3。dial 2 の mirror 用 GitHub トークンは forge DB に保存される。
+固定版なら --version 1.27.3。mirror 用の GitHub トークンは forge DB に保存される。
 
 ### 閉域網へ持ち込む
 
@@ -826,13 +847,14 @@ python3 "$OLNM_PY" hub bundle ./carry --flavor gitea --version 1.27.3
 carry/ を閉域側へコピーし、Linux amd64 の通常ユーザーで：
 
 ```sh
-python3 carry/olnm.py hub install --from carry/gitea-1.27.3-linux-amd64
-python3 carry/olnm.py hub init
-python3 carry/olnm.py hub up
+python3 carry/local_forge.py install --from carry/gitea-1.27.3-linux-amd64
+python3 carry/local_forge.py init
+python3 carry/local_forge.py up
 ```
 
-bundle はバイナリ・.sha256・olnm.py を含む。Python / git 自体は別途必要。
-amd64 以外は Python API `hub_bundle(..., arch="arm64")` などで明示し、取得元の対応を確認する。
+bundle はバイナリ・.sha256・local_forge.py（NagoyAction の forge 単体、標準ライブラリのみ）を含む。olnm.py・Python・git 自体は別途必要。
+閉域側で olnm の `hub` / `hubdial` / `ghis` などを使うなら `export NAGOYACTION="$PWD/carry/local_forge.py"` を設定する。olnm はこのファイルにサブコマンドを直接渡す。
+amd64 以外は NagoyAction の Python API `local_forge.hub_bundle(..., arch="arm64")` などで明示し、取得元の対応を確認する。
 forge なしでも gbundle / gunbundle で Git を持ち運べる。
 
 uvbundle は `uv tool run --from pip pip download` で wheels を取得する。初回は pip 自体の取得にもネットワークが必要。取得失敗時は失敗として終了する。
@@ -953,7 +975,7 @@ miseexec -- uv run --locked python -c 'print(6*7)'
 ラッパーは mise の警告を stderr に保ち、終了0だけを要求バージョンの確認結果にはしない。
 `miseoffline` は `MISE_AUTO_INSTALL=false` と `MISE_EXEC_AUTO_INSTALL=false` を子プロセスに設定する。
 これは完全なネットワーク遮断ではない。実行したコマンド・設定内の処理・バックエンドの通信まで止めるものではない。
-🌍 の付いたラッパーは従来の dial 0/1 では停止し、miseoffline / misels / misedoctor は利用できる。
+🌍 の付いたラッパーは従来どおり offline / local では停止し、miseoffline / misels / misedoctor は利用できる。
 Python API と後述の `olnm mise` は任意の mise コマンドを明示的に呼ぶ入口で、olnm の dial を適用せず mise 自体の設定に従う。
 
 ### Python / uv / Node から同じ処理を呼ぶ
@@ -1070,8 +1092,10 @@ uv の Python 環境に Node/Bun/Rust が自動で含まれるわけでもない
 | JSON parse error | 配列／オブジェクトをシングルクォートで囲む。true は小文字。stderr を stdout に結合しない |
 | --locked で失敗 | 利用側の cwd と uv.lock を確認。初回 uv sync、変更後 uv lock |
 | ruff がない | 利用側で uv add --dev ruff。uvcheck は自動導入しない |
-| needs dial ≥2 | ネット使用関数が dial 0/1 で停止。接続先を確認後 olnm_dial 2 等で変更 |
+| needs dial mirror or github | ネット使用関数が offline / local で停止。接続先を確認後 olnm_dial mirror 等で変更 |
 | dial を変えても定義が古い | olnm_reload または init を再度 eval。run は毎回読み直す |
+| the local forge now lives in NagoyAction | NagoyAction が未導入。表示どおり uv ツールとして入れるか NAGOYACTION を設定 |
+| dial unchanged | forge があるのに NagoyAction が見つからない。上と同じく導入してから olnm_dial を再実行 |
 | forge が起動しない | 通常ユーザー、対応 CPU、空きポートを確認。hub status / logs / doctor |
 | not a registered repo | 対象 repo で hub repo add .。Python API は path を明示 |
 | PR の base がない | main を local へ先に push。別 base は --base で指定 |
@@ -1084,7 +1108,7 @@ uv の Python 環境に Node/Bun/Rust が自動で含まれるわけでもない
 python3 -m unittest discover -s tests -v
 ```
 
-forge 本体の代わりに tests/fake_forgejo.py で CLI / REST を代行し、dial・Git remote・Issue・PR・mirror 登録を確認する。
+forge 本体のテスト（偽 Forgejo による CLI / REST、実 Gitea 1.27.3 の CI）は NagoyAction 側にある。olnm のテストは、偽の `nagoyaction` で引数・終了コードの転送、forge があるときの dial の委譲と拒否、ダイヤル名を確認する。
 実際の forge 取得、外部サービスへの push、全 246 関数の副作用を伴う実行はこのテストでは行わない。
 全関数の定義・名前の一意性、全 CLI 階層のヘルプ、代表例の実出力・終了コードを確認する。
 Python ワンライナー、Node の引数配列、JSON、stdin、空白を含むパス、uv の導入経路も確認する。
@@ -1104,14 +1128,14 @@ uv とビルド時の setuptools が必要。初回はネットワークを使�
 実行時依存はゼロで、setuptools はパッケージを作るときだけ使う。
 Git URL の導入は当該コミットが GitHub にある必要があり、ローカル導入検証とは別に扱う。
 
-従来 README の実機記録：Gitea 1.27.3 / 1.24.6 で install / bundle / init / up / repo add / push / labels / issue / PR / dial 0〜3 / sync / mirror 登録を確認。Forgejo 実機は未確認。
+従来 README の実機記録（forge が olnm 内蔵だった時期）：Gitea 1.27.3 / 1.24.6 で install / bundle / init / up / repo add / push / labels / issue / PR / dial 0〜3 / sync / mirror 登録を確認。Forgejo 実機は未確認。
 この履歴は今回の代行テスト・uv 検証と区別する。
 
 uv の参照先：[scripts](https://docs.astral.sh/uv/guides/scripts/)・[tools](https://docs.astral.sh/uv/guides/tools/)・[entry points](https://docs.astral.sh/uv/concepts/projects/config/#command-line-interfaces)。
 
 ## 追加ルール
 
-olnm.py の SHELL 内で関数の直前に `# <絵文字> 名前: 説明` を 1 行。🌍 を書くと dial 0/1 で停止する。
+olnm.py の SHELL 内で関数の直前に `# <絵文字> 名前: 説明` を 1 行。🌍 を書くと offline / local で停止する。
 実装を増減したら全件表と件数も更新する。実行時の最新一覧は ls / call public / call entries。
 
 ## Python API 全件
@@ -1119,7 +1143,7 @@ olnm.py の SHELL 内で関数の直前に `# <絵文字> 名前: 説明` を 1 
 `import olnm` 後の名前。シェル関数とは別の API。call public で同じ一覧を得られる。
 Python 欄の中身は `python3 -c 'import olnm; 表の中身'` として使う。call 欄は `python3 "$OLNM_PY" call` に続ける。
 Path の戻り値は CLI call で JSON 文字列、戻り値なしは null となる。
-**hub の例は前節の導入・起動・repo 登録と必要なブランチ・ラベル作成が前提。導入／Issue・PR 作成／push／停止／登録解除は実際に状態を変更するため、一括実行用の表ではない。**
+forge の操作関数（install / init / repo / issue / pr など）は NagoyAction の `local_forge` / `nagoyaction.forge` にある。「Python から hub」を参照。
 
 <!-- python-api:start -->
 | Python 署名 | Python ワンライナーの中身 | call に続ける引数 | 処理 |
@@ -1127,29 +1151,13 @@ Path の戻り値は CLI call で JSON 文字列、戻り値なしは null と�
 | `calc(expression: str) -> int \| float` | `print(olnm.calc("sqrt(81)*2"))` | `calc '["sqrt(81)*2"]'` | 制限付きの算術評価。対話入力は CLI calc を使う。 |
 | `complete(*words: str) -> list[str]` | `olnm.complete("olnm", "run", "pyc")` | `complete '["olnm","run","pyc"]'` | コマンド名と現在語を含む候補。表示と戻り値。 |
 | `tools(name: str \| None = None) -> dict` | `olnm.tools("node")` | `tools '["node"]'` | PATH と導入案内。インストールは行わない。 |
-| `dial(level: int \| None = None) -> int` | `olnm.dial()` | `dial` | Show or set the dial. When the local forge exists, also start/stop it and re-point every repo's origin. |
+| `dial(level: int \| str \| None = None) -> int` | `olnm.dial()` | `dial` | 表示、または offline / local / mirror / github（0〜3 も可）で設定。forge があれば NagoyAction が forge と origin を動かす。 |
+| `dial_level(value: int \| str) -> int` | `print(olnm.dial_level("mirror"))` | `dial_level '["mirror"]'` | 名前または 0〜3 を保存値の数字へ。不正な値は ValueError。 |
+| `dial_label(level: int) -> str` | `print(olnm.dial_label(2))` | `dial_label '[2]'` | 名前が先、保存値が後の表示（`🔁 mirror (2)`）。 |
+| `hub_url() -> str` | `print(olnm.hub_url())` | `hub_url` | NagoyAction の状態ファイルの port から forge の URL。未設定なら 3000。 |
 | `doctor() -> dict` | `olnm.doctor()` | `doctor` | Optional tools on PATH, the dial, and the forge if set up. |
 | `entries() -> list[dict]` | `print(olnm.entries())` | `entries` | Every help line: section, emoji, name, description, needs-internet flag. |
 | `grep(*words: str) -> list[dict]` | `olnm.grep("json", "pretty")` | `grep '["json","pretty"]'` | Search names and descriptions (all words must match, case-insensitive). |
-| `hub_api(method: str, path: str, data: dict \| None = None, token: str \| None = None, base: str \| None = None)` | `print(olnm.hub_api("GET", "/user/repos"))` | `hub_api '["GET","/user/repos"]'` | Gitea / Forgejo REST v1 (GitHub-shaped): hub_api('GET', '/user/repos'). |
-| `hub_bundle(dest: str = 'carry', version: str = 'latest', arch: str = 'amd64', flavor: str = 'gitea') -> pathlib.Path` | `print(olnm.hub_bundle("carry", version="1.27.3"))` | `hub_bundle '["carry"]' --kwargs '{"version":"1.27.3"}'` | 🌍 Download the forge binary + .sha256 into DEST and copy olnm.py beside it — carry DEST into a closed network. |
-| `hub_doctor() -> dict` | `olnm.hub_doctor()` | `hub_doctor` | Binary, config, token, forge, git, gh, GitHub reachability. |
-| `hub_down() -> None` | `olnm.hub_down()` | `hub_down` | Stop the forge. |
-| `hub_init(port: int = 3000, user: str = 'admin', password: str \| None = None, email: str = 'admin@localhost') -> dict` | `olnm.hub_init(port=3000)` | `hub_init '[]' --kwargs '{"port":3000}'` | Write app.ini (sqlite, 127.0.0.1 only, no SSH/mail/sign-up), migrate, create admin + API token, set git auth. |
-| `hub_install(version: str = 'latest', src: str \| None = None, sha: str \| None = None, flavor: str = 'gitea') -> pathlib.Path` | `print(olnm.hub_install(version="1.27.3"))` | `hub_install '[]' --kwargs '{"version":"1.27.3"}'` | Place the forge binary at ~/.olnm/forge/bin/forge. Online: download+verify. Offline: --from carried file (checked against sha or sidecar .sha256). |
-| `hub_issue_ls(path: str = '.', state: str = 'open') -> list` | `olnm.hub_issue_ls(path=".", state="all")` | `hub_issue_ls '[]' --kwargs '{"path":".","state":"all"}'` | Issues of the current repo. |
-| `hub_issue_new(title: str, body: str = '', labels: list[str] \| None = None, path: str = '.') -> dict` | `olnm.hub_issue_new("crash", labels=["bug"], path=".")` | `hub_issue_new '["crash"]' --kwargs '{"labels":["bug"],"path":"."}'` | New issue; labels by name (unknown names are skipped). |
-| `hub_labels(path: str = '.') -> None` | `olnm.hub_labels(path=".")` | `hub_labels '["."]'` | GitHub's default labels (bug, enhancement, …) in the current repo. |
-| `hub_logs(n: int = 40) -> str` | `olnm.hub_logs(n=80)` | `hub_logs '[80]'` | Tail the forge web log. |
-| `hub_port() -> int` | `print(olnm.hub_port())` | `hub_port` | Port of the local forge. |
-| `hub_pr_ls(path: str = '.') -> list` | `olnm.hub_pr_ls(path=".")` | `hub_pr_ls '["."]'` | Open pull requests. |
-| `hub_pr_new(title: str, head: str \| None = None, base: str = 'main', body: str = '', path: str = '.') -> dict` | `olnm.hub_pr_new("fix demo", head="fix-demo", base="main", path=".")` | `hub_pr_new '["fix demo"]' --kwargs '{"head":"fix-demo","base":"main","path":"."}'` | PR from the current branch (pushed to `local` first). |
-| `hub_repo_add(path: str = '.', github: str \| None = None, private: bool = True) -> dict` | `olnm.hub_repo_add(path=".", private=True)` | `hub_repo_add '["."]' --kwargs '{"private":true}'` | Register a working tree: forge repo + bare backup, remotes `local` `bare` (`github`), origin by dial. |
-| `hub_repo_ls() -> dict` | `print(olnm.hub_repo_ls())` | `hub_repo_ls` | Registered repos. |
-| `hub_repo_rm(path: str = '.') -> None` | `olnm.hub_repo_rm(path=".")` | `hub_repo_rm '["."]'` | Unregister a working tree (nothing deleted). |
-| `hub_status() -> dict` | `olnm.hub_status()` | `hub_status` | Dial, forge state, repo count. |
-| `hub_sync() -> dict` | `olnm.hub_sync()` | `hub_sync` | Push every registered repo to bare / local / github (github only at dial ≥2). |
-| `hub_up() -> int` | `olnm.hub_up()` | `hub_up` | Start the forge in the background. |
 | `init(shell: str \| None = None) -> str` | `olnm.init("bash")` | `init '["bash"]'` | Shell code to eval: functions + dial stubs + typo hook + completion. |
 | `like(word: str, hint: bool = False, n: int = 6) -> list[str]` | `olnm.like("uvtets", n=2)` | `like '["uvtets"]' --kwargs '{"n":2}'` | Closest names: substring hits first, then difflib similarity ≥0.5. |
 | `ls(section: str \| None = None, offline: bool = False) -> list[dict]` | `olnm.ls("python", offline=True)` | `ls '["python"]' --kwargs '{"offline":true}'` | Print help lines, optionally one section and/or offline-only. |
@@ -1157,7 +1165,7 @@ Path の戻り値は CLI call で JSON 文字列、戻り値なしは null と�
 | `names() -> list[str]` | `print(olnm.names())` | `names` | All function names (help lines only, private helpers excluded). |
 | `net() -> list[str]` | `olnm.net()` | `net` | Names that need internet (🌍). |
 | `public() -> list[str]` | `print(olnm.public())` | `public` | Names callable through `call`. |
-| `read_dial(default: int = 3) -> int` | `print(olnm.read_dial())` | `read_dial` | Current dial (0..3); unset = 3 (plain online box). |
+| `read_dial(default: int = 3) -> int` | `print(olnm.read_dial())` | `read_dial` | 現在のダイヤルを保存値の数字で（0 offline · 1 local · 2 mirror · 3 github）。未設定は 3。 |
 | `calculate(*args: str, engine: str = "python") -> int` | `olnm.calculate("6", "mul", "7")` | `olnm calc 6 mul 7` | 数値計算を表示し、エンジンの終了コードを返す。bash不要。 |
 | `run(name: str, *args: str) -> int` | `raise SystemExit(olnm.run("calc", "6", "mul", "7"))` | run サブコマンドを使う | Run one one-liner in a non-interactive bash (for Node / Bun / Python callers). |
 | `xprobe(*args: str) -> int` | `raise SystemExit(olnm.xprobe("--help"))` | xprobe サブコマンドを使う | 固定コミットの単一ファイルツールをuvのキャッシュ経由で実行。 |
@@ -1186,7 +1194,7 @@ Path の戻り値は CLI call で JSON 文字列、戻り値なしは null と�
 | `olnm_sections` | 🗂️ section names |
 | `olnm_offline` | 🔒 only one-liners that work without internet |
 | `olnm_net` | 🌍 names that need internet |
-| `olnm_dial` | 🎛️ show / set dial 0🔌 1🏠 2🔁 3☁️ (also starts/stops the forge, re-points origins) |
+| `olnm_dial` | 🎛️ show / set dial offline \| local \| mirror \| github (with a local forge, NagoyAction also moves it and origins) |
 | `olnm_doctor` | 🩺 which tools are present |
 | `olnm_reload` | 🔄 re-evaluate after edits or dial change |
 | `olnm_edit` | 📝 open olnm.py in $EDITOR |
@@ -1304,14 +1312,14 @@ Path の戻り値は CLI call で JSON 文字列、戻り値なしは null と�
 
 | 関数 | 説明 |
 |---|---|
-| `ghpr` | 🐙 🎛️ create PR (hubdial at dial ≤2, gh at 3) (ghpr "title") |
-| `ghprs` | 📋 🎛️ list open PRs (hubdial at dial ≤2) |
+| `ghpr` | 🐙 🎛️ create PR (hubdial at offline..mirror, gh at github) (ghpr "title") |
+| `ghprs` | 📋 🎛️ list open PRs (hubdial at offline..mirror) |
 | `ghprv` | 👀 🌍 view current PR in browser |
 | `ghprm` | ✅ 🌍 squash-merge PR and delete branch (ghprm [num]) |
 | `ghco` | 🔀 🌍 checkout PR by number (ghco 42) |
-| `ghis` | 🐛 🎛️ list open issues (hubdial at dial ≤2) |
-| `ghisn` | 🐛 🎛️ new issue (ghisn "title" [label]) (hubdial at dial ≤2) |
-| `ghweb` | 🌐 🎛️ open repo in browser (local forge at dial ≤2) |
+| `ghis` | 🐛 🎛️ list open issues (hubdial at offline..mirror) |
+| `ghisn` | 🐛 🎛️ new issue (ghisn "title" [label]) (hubdial at offline..mirror) |
+| `ghweb` | 🌐 🎛️ open repo in browser (local forge at offline..mirror) |
 | `ghruns` | 🏃 🌍 recent workflow runs |
 | `ghwatch` | 👀 🌍 watch latest workflow run |
 | `ghclone` | 📥 🌍 clone by owner/repo (ghclone owner/repo) |
@@ -1455,9 +1463,9 @@ Path の戻り値は CLI call で JSON 文字列、戻り値なしは null と�
 
 | 関数 | 説明 |
 |---|---|
-| `hubdial` | 🏠 local GitHub-like forge (hubdial install \| init \| up \| down \| status \| repo \| issue \| pr \| labels \| sync \| api) |
+| `hubdial` | 🏠 local GitHub-like forge via `nagoyaction forge` (hubdial install \| init \| up \| down \| status \| repo \| issue \| pr \| labels \| sync \| api) |
 | `hubadd` | 📚 register cwd in the local forge (hubadd [--github owner/name]) |
-| `hubsync` | 🔄 push every registered repo to bare / local / github(dial ≥2) |
+| `hubsync` | 🔄 push every registered repo to bare / local / github (github at mirror and up) |
 | `hubopen` | 🌐 open the local forge in a browser (or print its URL) |
 
 ### docker
