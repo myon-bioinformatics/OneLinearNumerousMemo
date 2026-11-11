@@ -1,4 +1,4 @@
-"""🏠 The local forge lives in NagoyAction: olnm hands `hub` (and a dial move with a forge) to `nagoyaction forge`."""
+"""🏠 The local forge lives in NagoyAction: olnm hands `hub` (and a dial move with a forge) to `nagoyaction hub`."""
 import json
 import os
 from pathlib import Path
@@ -41,15 +41,15 @@ class ForgeDelegationTest(unittest.TestCase):
     def test_hub_forwards_exact_arguments_and_exit_code(self):
         result = self.olnm("hub", "issue", "new", "title with spaces", "--body", "line one")
         self.assertEqual(result.returncode, 7, result.stderr)
-        self.assertEqual(self.forwarded(), ["forge", "issue", "new", "title with spaces", "--body", "line one"])
+        self.assertEqual(self.forwarded(), ["hub", "issue", "new", "title with spaces", "--body", "line one"])
         self.assertEqual(self.olnm("hub", "--help").returncode, 7)
-        self.assertEqual(self.forwarded(), ["forge", "--help"])
+        self.assertEqual(self.forwarded(), ["hub", "--help"])
 
     def test_dial_with_a_forge_is_moved_by_nagoyaction(self):
         self.with_forge()
         result = self.olnm("dial", "mirror")
         self.assertEqual(result.returncode, 7, result.stderr)
-        self.assertEqual(self.forwarded(), ["forge", "dial", "2"])
+        self.assertEqual(self.forwarded(), ["hub", "dial", "2"])
         self.assertFalse((self.home / "dial").exists())  # NagoyAction writes it after moving the origins
 
     def test_dial_without_a_forge_stays_in_olnm(self):
@@ -63,7 +63,7 @@ class ForgeDelegationTest(unittest.TestCase):
         script.write_text(FAKE.format(py=sys.executable, log=str(self.log)))
         result = self.olnm("hub", "status", NAGOYACTION=str(script), PATH="/usr/bin:/bin")
         self.assertEqual(result.returncode, 7, result.stderr)
-        self.assertEqual(self.forwarded(), ["forge", "status"])
+        self.assertEqual(self.forwarded(), ["hub", "status"])
 
     def test_carried_local_forge_py_takes_sub_directly(self):
         # `hub bundle` carries local_forge.py into a closed network; it has no `forge` subcommand.
@@ -77,7 +77,7 @@ class ForgeDelegationTest(unittest.TestCase):
     def test_missing_nagoyaction_explains_how_to_install(self):
         result = self.olnm("hub", "status", PATH="/usr/bin:/bin")
         self.assertEqual(result.returncode, 127)
-        self.assertIn("nagoyaction forge", result.stderr)
+        self.assertIn("nagoyaction hub", result.stderr)
         self.assertIn("uv tool install", result.stderr)
         self.with_forge()
         (self.home / "dial").write_text("3\n")
@@ -94,7 +94,7 @@ class ForgeDelegationTest(unittest.TestCase):
         script = f'eval "$(python3 {ROOT / "olnm.py"} init bash)"\nghisn crash bug; echo "rc=$?"; hubopen'
         result = subprocess.run(["bash", "-c", script], env=self.env, text=True, capture_output=True)
         self.assertIn("rc=7", result.stdout, result.stderr)
-        self.assertEqual(self.forwarded(), ["forge", "issue", "new", "crash", "--label", "bug"])
+        self.assertEqual(self.forwarded(), ["hub", "issue", "new", "crash", "--label", "bug"])
         self.assertIn("http://localhost:3123/", result.stdout)
         (self.home / "dial").write_text("3\n")
         result = subprocess.run(["bash", "-c", f'eval "$(python3 {ROOT / "olnm.py"} init bash)"\n_olnm_hub && echo HUB || echo GH'],

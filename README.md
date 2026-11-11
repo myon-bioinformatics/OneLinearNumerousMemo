@@ -657,9 +657,9 @@ run は呼び出し元の cwd を引き継ぐ。
 | calc | `python3 "$OLNM_PY" calc 2 pow 10` |
 | run | `python3 "$OLNM_PY" run pyjson` |
 | call | `python3 "$OLNM_PY" call like '["uvtets"]' --kwargs '{"n":2}'` |
-| hub | `python3 "$OLNM_PY" hub --help`。`nagoyaction forge` へ転送。次節に全件 |
+| hub | `python3 "$OLNM_PY" hub --help`。`nagoyaction hub` へ転送。次節に全件 |
 
-NagoyAction 導入後は `hub repo add --help` / `hub issue new --help` / `hub pr new --help` まで個別ヘルプがある（`nagoyaction forge …` のヘルプ）。
+NagoyAction 導入後は `hub repo add --help` / `hub issue new --help` / `hub pr new --help` まで個別ヘルプがある（`nagoyaction hub …` のヘルプ）。
 終了コードは通常成功 0、構文エラー 2、未知の run 関数 127。
 候補なしの通常 like は 0、like --hint は候補なしなら 127。
 run は子コマンドの終了コードを返す。call の数値の戻り値は JSON データであり、終了コードではない。
@@ -679,8 +679,8 @@ Node、Bun、Go、Rust、uv、mise は PATH 上の実行ファイルとバージ
 `DIAL_FILE` には従来どおり数字 0〜3 を保存するため、既存の読み手はそのまま動く。`dial 2` のような数字指定も使える。
 綴りを誤ると `did you mean: mirror?` を表示し、ダイヤルは変えない。
 
-ローカル forge は NagoyAction へ移った。`olnm hub ...` は `nagoyaction forge ...` に引数と終了コードをそのまま引き渡す。
-forge の状態（`$OLNM_HOME/forge/state.json`）がある場合、`olnm dial` の変更も `nagoyaction forge dial` に任せる。NagoyAction は origin と forge を動かしてから同じ `DIAL_FILE` を書く。
+ローカル forge は NagoyAction へ移った。`olnm hub ...` は `nagoyaction hub ...` に引数と終了コードをそのまま引き渡す。
+forge の状態（`$OLNM_HOME/forge/state.json`）がある場合、`olnm dial` の変更も `nagoyaction hub dial` に任せる。NagoyAction は origin と forge を動かしてから同じ `DIAL_FILE` を書く。
 forge があるのに NagoyAction が見つからない場合、olnm は `dial unchanged` と導入方法を表示して終了コード 127 で止まる。origin だけが古い接続先を指したまま push しないため。
 forge がなければ olnm 自身が `DIAL_FILE` を読み書きする。表示は NagoyAction と同じ。
 
@@ -728,7 +728,7 @@ forge 関連の保存物は NagoyAction が作り、同じ場所を使い続け�
 
 ## hub の導入から Issue・PR 作成まで
 
-forge の管理は [NagoyAction](https://github.com/myon-bioinformatics/NagoyAction) の `nagoyaction forge` が担う。olnm の `hub` はそこへ引数と終了コードを転送するだけで、forge のコードは持たない。
+forge の管理は [NagoyAction](https://github.com/myon-bioinformatics/NagoyAction) の `nagoyaction hub` が担う。olnm の `hub` はそこへ引数と終了コードを転送するだけで、forge のコードは持たない。
 先に NagoyAction を uv ツールとして入れる（標準ライブラリのみ、実行時依存なし）：
 
 ```bash
@@ -736,14 +736,14 @@ git clone https://github.com/myon-bioinformatics/NagoyAction
 cd NagoyAction
 python3 tools/build_uv_tool.py build/nagoyaction-tool
 uv tool install ./build/nagoyaction-tool
-nagoyaction forge --help
+nagoyaction hub --help
 ```
 
 導入せずに clone だけ使う場合は `export NAGOYACTION=/path/to/NagoyAction/nagoyaction.py` を設定する（閉域網へ持ち込んだ `local_forge.py` も指定できる。後述）。どちらもない状態で `olnm hub ...` を実行すると、この導入方法を表示して終了コード 127 で止まる。
 
 Gitea（既定）または Forgejo の Linux バイナリが必要。Go は不要。
 **通常ユーザーで実行する。** forge 本体は root 起動できない。
-以下はシェル関数未登録でも使える CLI 方式。`python3 "$OLNM_PY" hub ...` は `nagoyaction forge ...` と同じで、`hubdial ...` はその短縮関数。
+以下はシェル関数未登録でも使える CLI 方式。`python3 "$OLNM_PY" hub ...` は `nagoyaction hub ...` と同じで、`hubdial ...` はその短縮関数。
 
 ### 導入 → 起動 → repo 登録
 
@@ -798,11 +798,11 @@ Issue / PR / labels の対象は cwd の登録済み repo。repo ls は全登録
 ### Python から hub
 
 導入・起動・repo 登録後、その repo で実行する。forge の関数は olnm ではなく NagoyAction 側にある。
-`nagoyaction.forge(...)` は CLI と同じ引数を受け取り、終了コードを返す。NagoyAction の clone を import パスに置くか、その uv ツール環境の Python で実行する。
+`nagoyaction.hub(...)` は CLI と同じ引数を受け取り、終了コードを返す。NagoyAction の clone を import パスに置くか、その uv ツール環境の Python で実行する。
 
 ```bash
-python3 -c 'import nagoyaction; raise SystemExit(nagoyaction.forge("issue", "new", "crash", "--body", "再現手順", "--label", "bug"))'
-python3 -c 'import nagoyaction; raise SystemExit(nagoyaction.forge("dial", "mirror"))'
+python3 -c 'import nagoyaction; raise SystemExit(nagoyaction.hub("issue", "new", "crash", "--body", "再現手順", "--label", "bug"))'
+python3 -c 'import nagoyaction; raise SystemExit(nagoyaction.hub("dial", "mirror"))'
 python3 -c 'import local_forge; print(local_forge.hub_repo_ls())'
 ```
 
@@ -811,7 +811,7 @@ olnm 側に残る forge 関連の API は `hub_url()`（状態ファイルの po
 
 ### hub サブコマンド全件
 
-以下は `nagoyaction forge`（または同じものを転送する `python3 "$OLNM_PY" hub`）に続ける。olnm は最初の語だけを確認し、未知の語には候補を出す。それ以降の解釈とタイポ候補は NagoyAction が行う。
+以下は `nagoyaction hub`（または同じものを転送する `python3 "$OLNM_PY" hub`）に続ける。olnm は最初の語だけを確認し、未知の語には候補を出す。それ以降の解釈とタイポ候補は NagoyAction が行う。
 
 | 入口 | 引数・例 | 前提／副作用 |
 |---|---|---|
@@ -1143,7 +1143,7 @@ olnm.py の SHELL 内で関数の直前に `# <絵文字> 名前: 説明` を 1 
 `import olnm` 後の名前。シェル関数とは別の API。call public で同じ一覧を得られる。
 Python 欄の中身は `python3 -c 'import olnm; 表の中身'` として使う。call 欄は `python3 "$OLNM_PY" call` に続ける。
 Path の戻り値は CLI call で JSON 文字列、戻り値なしは null となる。
-forge の操作関数（install / init / repo / issue / pr など）は NagoyAction の `local_forge` / `nagoyaction.forge` にある。「Python から hub」を参照。
+forge の操作関数（install / init / repo / issue / pr など）は NagoyAction の `local_forge` / `nagoyaction.hub` にある。「Python から hub」を参照。
 
 <!-- python-api:start -->
 | Python 署名 | Python ワンライナーの中身 | call に続ける引数 | 処理 |
@@ -1463,7 +1463,7 @@ forge の操作関数（install / init / repo / issue / pr など）は NagoyAct
 
 | 関数 | 説明 |
 |---|---|
-| `hubdial` | 🏠 local GitHub-like forge via `nagoyaction forge` (hubdial install \| init \| up \| down \| status \| repo \| issue \| pr \| labels \| sync \| api) |
+| `hubdial` | 🏠 local GitHub-like forge via `nagoyaction hub` (hubdial install \| init \| up \| down \| status \| repo \| issue \| pr \| labels \| sync \| api) |
 | `hubadd` | 📚 register cwd in the local forge (hubadd [--github owner/name]) |
 | `hubsync` | 🔄 push every registered repo to bare / local / github (github at mirror and up) |
 | `hubopen` | 🌐 open the local forge in a browser (or print its URL) |

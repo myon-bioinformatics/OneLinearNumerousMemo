@@ -5,7 +5,7 @@
 
     olnm            📖 list            olnm git        📖 one section
     olnm_like uvtets 🤔 closest names  olnm_dial mirror  🎛️ 🔌 offline · 🏠 local · 🔁 mirror · ☁️ github (stored as 0-3)
-    hubdial status / up / repo add   🏠 local forge → `nagoyaction forge …` (NagoyAction) · ghpr/ghis go there at offline..mirror
+    hubdial status / up / repo add   🏠 local forge → `nagoyaction hub …` (NagoyAction) · ghpr/ghis go there at offline..mirror
 
 Rules: one function per line in SHELL below, `# <emoji> name: what it does` right above it = the help text.
        🌍 in a description = needs internet (stubbed at offline / local).  🎛️ = routed to hubdial at offline..mirror.
@@ -500,7 +500,7 @@ licenses() { python3 -c 'import importlib.metadata as m; [print("{:<30} {:<12} {
 pyfreeze() { uv pip freeze 2>/dev/null || python3 -m pip freeze; }
 
 # ───────────────────────── 🏠 hub ─────────────────────────
-# 🏠 hubdial: local GitHub-like forge via `nagoyaction forge` (hubdial install | init | up | down | status | repo | issue | pr | labels | sync | api)
+# 🏠 hubdial: local GitHub-like forge via `nagoyaction hub` (hubdial install | init | up | down | status | repo | issue | pr | labels | sync | api)
 hubdial() { python3 "$OLNM_PY" hub "$@"; }
 # 📚 hubadd: register cwd in the local forge (hubadd [--github owner/name])
 hubadd() { hubdial repo add . "$@"; }
@@ -703,11 +703,11 @@ def dial(level: int | str | None = None) -> int:
     return level
 
 
-# ───────────────────────── 🏠 hub: handed over to NagoyAction (`nagoyaction forge …`) ─────────────────────────
+# ───────────────────────── 🏠 hub: handed over to NagoyAction (`nagoyaction hub …`) ─────────────────────────
 FORGE_STATE = OLNM_HOME / "forge" / "state.json"  # written by NagoyAction; olnm only checks it exists and reads the port
 HUB_SUBS = ("install", "bundle", "init", "up", "down", "status", "doctor", "logs", "dial", "repo", "api", "issue", "pr", "labels", "sync")
 NAGOYACTION_HINT = """\
-🏠 the local forge now lives in NagoyAction: olnm hub … runs `nagoyaction forge …`.
+🏠 the local forge now lives in NagoyAction: olnm hub … runs `nagoyaction hub …`.
    install:  git clone https://github.com/myon-bioinformatics/NagoyAction && cd NagoyAction
              python3 tools/build_uv_tool.py build/nagoyaction-tool && uv tool install ./build/nagoyaction-tool
    or point at a checkout:  export NAGOYACTION=/path/to/NagoyAction/nagoyaction.py
@@ -722,12 +722,12 @@ def _nagoyaction() -> list[str] | None:
 
 
 def _forge(*args: str) -> int:
-    """`nagoyaction forge ARGS` with this terminal's stdio; 127 + install guidance when NagoyAction is missing."""
+    """`nagoyaction hub ARGS` with this terminal's stdio; 127 + install guidance when NagoyAction is missing."""
     if not (cmd := _nagoyaction()):
         print(NAGOYACTION_HINT, file=sys.stderr)
         return 127
     direct = Path(cmd[-1]).name in ("local_forge.py", "local-forge")  # the forge alone (e.g. carried by `hub bundle`) takes SUB directly
-    return subprocess.run([*cmd, *([] if direct else ["forge"]), *args]).returncode
+    return subprocess.run([*cmd, *([] if direct else ["hub"]), *args]).returncode
 
 
 def hub_url() -> str:
@@ -1142,7 +1142,7 @@ def doctor() -> dict:
     print("This check cannot see the parent shell's aliases/functions or files sourced indirectly; it does not delete or modify anything.")
     dial()
     if FORGE_STATE.exists():
-        print(f"local forge: {FORGE_STATE.parent} (managed by `nagoyaction forge`)")
+        print(f"local forge: {FORGE_STATE.parent} (managed by `nagoyaction hub`)")
         _forge("status")
     return res
 
@@ -1208,9 +1208,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("level", nargs="?", choices=[*DIAL_NAMES, *map(str, DIALS)], metavar="level", help="offline | local | mirror | github (0-3 also work); omit to show")
     s = sp.add_parser("run", help="▶️ run one one-liner in bash"); s.add_argument("name"); s.add_argument("args", nargs=argparse.REMAINDER)
     s = sp.add_parser("call", help="🔌 call a function by name → JSON"); s.add_argument("fn"); s.add_argument("args", nargs="?", default="[]"); s.add_argument("--kwargs", default="{}")
-    s = sp.add_parser("hub", help="🏠 local GitHub-like forge → nagoyaction forge (arguments and exit code passed through)",
+    s = sp.add_parser("hub", help="🏠 local GitHub-like forge → nagoyaction hub (arguments and exit code passed through)",
                       epilog=NAGOYACTION_HINT, formatter_class=argparse.RawDescriptionHelpFormatter)
-    s.add_argument("sub", choices=HUB_SUBS, metavar="sub", help=" | ".join(HUB_SUBS) + "; nagoyaction forge SUB --help for the rest")
+    s.add_argument("sub", choices=HUB_SUBS, metavar="sub", help=" | ".join(HUB_SUBS) + "; nagoyaction hub SUB --help for the rest")
     s.add_argument("args", nargs=argparse.REMAINDER)
     return ap
 
