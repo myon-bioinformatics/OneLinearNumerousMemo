@@ -253,7 +253,7 @@ class TestOfflineDial(unittest.TestCase):
     @unittest.skipUnless(shutil.which("uv"), "requires uv")
     def test_uv_refuses_the_network_at_once(self):
         olnm.dial("local")
-        r = bash("uv pip install --dry-run --system olnm-no-such-package-xyz")
+        r = bash("echo olnm-no-such-package-xyz | uv pip compile -")  # resolution only: needs no environment to install into
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("network was disabled", r.stderr)
 
