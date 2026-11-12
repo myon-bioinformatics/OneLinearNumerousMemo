@@ -1,6 +1,7 @@
 # 🧷 OneLinearNumerousMemo (olnm)
 
-bash/zsh 用の **246 個のシェル関数**と、ローカル GitHub（Gitea / Forgejo）を扱う **43 個の Python API**。
+bash/zsh 用の **249 個のシェル関数**と、それを Python・Node から名前で呼べる **28 個の Python API**。
+ローカル GitHub（Gitea / Forgejo）とワークフロー検査は NagoyAction（`nagoyaction hub` / `nagoyaction actionlint`）へ転送する。
 実装は `olnm.py` 1 ファイル、実行時の Python 外部依存はゼロ。
 Python 3.11 以降、Linux（Ubuntu / WSL の Ubuntu）の bash/zsh を対象とする。
 macOS では GNU コマンドとの差異があり、PowerShell/cmd からシェル関数を使う場合は WSL 内で実行する。
@@ -31,6 +32,8 @@ Node / Bun / gh / Docker / fzf などは、それを使う関数を実行する�
 - [mise：複数言語の共通入口](#mise複数言語の共通入口)
 - [Node・Bun・Rust と作業ディレクトリ](#nodebunrust-と作業ディレクトリ)
 - [olnm 自体の更新](#olnm-自体の更新)
+- [整理した名前](#整理した名前)
+- [ワークフローを検査する（ghlint）](#ワークフローを検査するghlint)
 - [困ったとき](#困ったとき)
 - [検証範囲と再実行](#検証範囲と再実行)
 - [Python API 全件](#python-api-全件)
@@ -280,6 +283,7 @@ stdout / stderr / stdin / cwd / 終了コードは供給元へ引き継ぎ、シ
 `call xprobe` 等では実行出力と戻り値JSONが混じるため、直接CLI/APIを使う。
 
 olnm の dial が offline / local のときは uv に `--offline` を付け、取得済みキャッシュだけを使用する。未取得のツールは失敗する。
+同じダイヤルで読み込んだシェルでは `UV_OFFLINE=1` と `npm_config_offline=true` も設定されるので、`uvtest` や `nt` などが呼ぶ uv / npm もキャッシュだけを使い、通信を待たずにすぐ失敗する。
 uvのoffline指定は子ツールの通信を遮断しない。ghiのAPI操作等は供給元の仕様に従う。
 採用コミットは `_STDLIB_TOOLS` に完全SHAで固定し、olnm更新時に検証済みの版へ更新する。
 供給元6リポジトリのuv配布PRはmainへ統合済み。検証したmainの完全SHAを採用し、更新時にも取得・実行テストを行う。
@@ -386,7 +390,7 @@ python3 -c 'import os, runpy; m = runpy.run_path(os.environ["OLNM_PY"]); m["like
 
 ```sh
 python3 -c 'import os, subprocess, sys; r = subprocess.run([sys.executable, os.environ["OLNM_PY"], "calc", "6*7"], text=True, capture_output=True, check=True); print(r.stdout.strip())'
-python3 -c 'import os, subprocess, sys; r = subprocess.run([sys.executable, os.environ["OLNM_PY"], "run", "pyjson"], input="{\"answer\":42}", text=True, capture_output=True, check=True); print(r.stdout, end="")'
+python3 -c 'import os, subprocess, sys; r = subprocess.run([sys.executable, os.environ["OLNM_PY"], "run", "jsonf"], input="{\"answer\":42}", text=True, capture_output=True, check=True); print(r.stdout, end="")'
 ```
 
 引数はリストで渡す。`shell=True` は不要。`run` の引数の空白はそのまま渡る。
@@ -645,19 +649,20 @@ run は呼び出し元の cwd を引き継ぐ。
 | ls | `python3 "$OLNM_PY" ls` / `ls git` / `ls --offline` / `ls python --offline` |
 | grep | `python3 "$OLNM_PY" grep json pretty`（全語一致） |
 | like | `python3 "$OLNM_PY" like uvtets` / `like uvtets --hint` |
+| show | `python3 "$OLNM_PY" show gp`（実行前に定義を表示。未知の名前は候補を出して 127） |
 | sections | `python3 "$OLNM_PY" sections` |
 | net | `python3 "$OLNM_PY" net`（🌍 の関数名） |
 | doctor | `python3 "$OLNM_PY" doctor`（任意ツールの欠如も表示） |
-| calc | `python3 "$OLNM_PY" calc`（式を対話入力）、`calc 6 + 7`、stdin からも入力可 |
+| calc | `python3 "$OLNM_PY" calc`（式を対話入力）、`calc 6 + 7`、`calc 2 pow 10`、stdin からも入力可 |
 | complete | `python3 "$OLNM_PY" complete -- olnm dial ""`（候補を改行区切りで表示） |
 | tools | `python3 "$OLNM_PY" tools` / `tools mise` / `tools node` / `tools bun` / `tools go` / `tools rust`（存在確認と導入案内のみ） |
 | mise | `python3 "$OLNM_PY" mise exec node@26 -- node -v`（argv を mise へ転送） |
 | yourself | `python3 "$OLNM_PY" yourself --minimal --format json`（登録不要の同梱版） |
 | dial | `python3 "$OLNM_PY" dial` / `dial offline`（設定変更。local / mirror / github、0〜3 も可） |
-| calc | `python3 "$OLNM_PY" calc 2 pow 10` |
-| run | `python3 "$OLNM_PY" run pyjson` |
+| run | `python3 "$OLNM_PY" run jsonf` |
 | call | `python3 "$OLNM_PY" call like '["uvtets"]' --kwargs '{"n":2}'` |
 | hub | `python3 "$OLNM_PY" hub --help`。`nagoyaction hub` へ転送。次節に全件 |
+| actionlint | `python3 "$OLNM_PY" actionlint` / `actionlint --strict`。`nagoyaction actionlint` へ転送（シェルでは `ghlint`） |
 
 NagoyAction 導入後は `hub repo add --help` / `hub issue new --help` / `hub pr new --help` まで個別ヘルプがある（`nagoyaction hub …` のヘルプ）。
 終了コードは通常成功 0、構文エラー 2、未知の run 関数 127。
@@ -683,6 +688,9 @@ Node、Bun、Go、Rust、uv、mise は PATH 上の実行ファイルとバージ
 forge の状態（`$OLNM_HOME/forge/state.json`）がある場合、`olnm dial` の変更も `nagoyaction hub dial` に任せる。NagoyAction は origin と forge を動かしてから同じ `DIAL_FILE` を書く。
 forge があるのに NagoyAction が見つからない場合、olnm は `dial unchanged` と導入方法を表示して終了コード 127 で止まる。origin だけが古い接続先を指したまま push しないため。
 forge がなければ olnm 自身が `DIAL_FILE` を読み書きする。表示は NagoyAction と同じ。
+
+offline / local で定義を読み込むと、🌍 の関数が停止するのに加えて `UV_OFFLINE=1` と `npm_config_offline=true` を設定する。uv と npm は取得済みキャッシュだけを使う。
+mirror / github に戻して `olnm_dial` か `olnm_reload` を実行すると、olnm が設定した分だけを解除する（自分で設定した `UV_OFFLINE` は残る）。
 
 `OLNM_HOME`（既定 `~/.olnm`）、`DIAL_FILE`（既定 `$OLNM_HOME/dial`）は **Python の起動／import 前**に設定する。
 ダイヤル未設定時は github（3）。
@@ -1038,7 +1046,7 @@ command -v node npm npx bun rustc cargo rustup
 
 `tools` は PATH 上の有無・見つかったパス・公式の導入先・作業フォルダの扱いを表示する。自動インストールや設定変更はしない。
 Node/Bun 関数の呼び出し時にも、不足した実行環境を確認して具体的な案内を表示し、終了127となる。
-例: `run njson` に Node がなければ Node の案内。`run bi` に Bun がなければ Bun の案内。
+例: `run nscripts` に Node がなければ Node の案内。`run bi` に Bun がなければ Bun の案内。
 呼ぶたびに確認するため、同じターミナルの PATH に追加した後は定義の再読み込みは不要。
 `nclean` は npm 不在時に node_modules やロックを消さず停止する。
 
@@ -1077,6 +1085,27 @@ uv の Python 環境に Node/Bun/Rust が自動で含まれるわけでもない
 シェルへ読み込んだ関数は古い定義が残るため、本体更新後に init を再度 eval する。zsh は init zsh。
 `olnm_update` の URL 未設定時もファイル方式／uv tool 方式の次の操作を表示する。
 
+## 整理した名前
+
+同じ仕事をする関数は 1 つにまとめた。旧名を入力すると、タイポ案内が今の名前を表示する（例: `pyjson` → `🤔 pyjson was merged → use: jsonf`）。
+
+| 旧 | 今 | 補足 |
+|---|---|---|
+| `pyjson` / `njson` / `bjson` | `jsonf` | jq があれば jq、なければ Python。どちらも 2 スペース・日本語はそのまま |
+| `pyhash` | `sha` | 複数ファイル可 |
+| `pyepoch` | `epoch` | 引数なしは現在の秒、`epoch 1700000000` は ISO 表記 |
+| `pyv` / `nv` / `bv` | `ver` | 版とパスを表示。`ver node bun` のように絞れる |
+| `nhttp` | `pyhttp` | python3 は必ずあるため |
+| `dpsa` | `dps -a` | |
+| `hubsync` | `hubdial sync` | |
+| `olnm_steps` | `loc py` | |
+
+## ワークフローを検査する（ghlint）
+
+`ghlint` は今いるリポジトリの `.github/workflows` を `nagoyaction actionlint` で検査する（`python3 "$OLNM_PY" actionlint` と同じ）。NagoyAction の導入は hub と共通。
+GitHub に届かない閉域網でも止まらず、検査できなかった項目を `[skip]` と表示する。`ghlint --strict` は検査できないものを失敗にする。
+`NAGOYACTION` が持ち込んだ `local_forge.py` を指している場合は使えない（forge 単体のため）。NagoyAction の clone か uv ツールが必要。
+
 ## 困ったとき
 
 | 症状 | 確認・対処 |
@@ -1109,7 +1138,7 @@ python3 -m unittest discover -s tests -v
 ```
 
 forge 本体のテスト（偽 Forgejo による CLI / REST、実 Gitea 1.27.3 の CI）は NagoyAction 側にある。olnm のテストは、偽の `nagoyaction` で引数・終了コードの転送、forge があるときの dial の委譲と拒否、ダイヤル名を確認する。
-実際の forge 取得、外部サービスへの push、全 246 関数の副作用を伴う実行はこのテストでは行わない。
+実際の forge 取得、外部サービスへの push、全 249 関数の副作用を伴う実行はこのテストでは行わない。docker / gh / systemctl などを呼ぶ関数は、偽のコマンドで渡す引数だけを確認する。
 全関数の定義・名前の一意性、全 CLI 階層のヘルプ、代表例の実出力・終了コードを確認する。
 Python ワンライナー、Node の引数配列、JSON、stdin、空白を含むパス、uv の導入経路も確認する。
 追加の入力支援テストは bash / zsh の補完登録と候補、疑似端末での式入力と Tab、タイポ候補、不正JSON、Node/Bun不在時の案内を確認する。zsh / readline がない環境では該当ケースのみ skip。
@@ -1136,7 +1165,8 @@ uv の参照先：[scripts](https://docs.astral.sh/uv/guides/scripts/)・[tools]
 ## 追加ルール
 
 olnm.py の SHELL 内で関数の直前に `# <絵文字> 名前: 説明` を 1 行。🌍 を書くと offline / local で停止する。
-実装を増減したら全件表と件数も更新する。実行時の最新一覧は ls / call public / call entries。
+実装を増減したら `python3 scripts/update_readme.py` でシェル関数の全件表を作り直し、件数も更新する（表とソースが違うとテストが失敗する）。
+同じ仕事をする関数がすでにあれば、新しい名前を足さずその関数を広げる。まとめて消した名前は olnm.py の `_MOVED` に行き先を書く。実行時の最新一覧は ls / call public / call entries。
 
 ## Python API 全件
 
@@ -1160,6 +1190,7 @@ forge の操作関数（install / init / repo / issue / pr など）は NagoyAct
 | `grep(*words: str) -> list[dict]` | `olnm.grep("json", "pretty")` | `grep '["json","pretty"]'` | Search names and descriptions (all words must match, case-insensitive). |
 | `init(shell: str \| None = None) -> str` | `olnm.init("bash")` | `init '["bash"]'` | Shell code to eval: functions + dial stubs + typo hook + completion. |
 | `like(word: str, hint: bool = False, n: int = 6) -> list[str]` | `olnm.like("uvtets", n=2)` | `like '["uvtets"]' --kwargs '{"n":2}'` | Closest names: substring hits first, then difflib similarity ≥0.5. |
+| `show(name: str) -> str` | `olnm.show("gp")` | `show '["gp"]'` | ヘルプ行とシェル定義を表示して返す。未知の名前は候補を stderr に出して空文字。 |
 | `ls(section: str \| None = None, offline: bool = False) -> list[dict]` | `olnm.ls("python", offline=True)` | `ls '["python"]' --kwargs '{"offline":true}'` | Print help lines, optionally one section and/or offline-only. |
 | `mise(*args: str) -> int` | `raise SystemExit(olnm.mise("exec", "--", "node", "--version"))` | mise サブコマンドを使う | argv・入出力・終了コードを引き継ぐ直接呼び出し。 |
 | `names() -> list[str]` | `print(olnm.names())` | `names` | All function names (help lines only, private helpers excluded). |
@@ -1191,6 +1222,7 @@ forge の操作関数（install / init / repo / issue / pr など）は NagoyAct
 | `olnm` | 📖 list one-liners (olnm git = one section) |
 | `olnm_grep` | 🔎 search help text (olnm_grep json) |
 | `olnm_like` | 🤔 closest names to a typo or fragment (olnm_like uvtets) |
+| `olnm_show` | 👁️ print a one-liner's definition before running it (olnm_show gp) |
 | `olnm_sections` | 🗂️ section names |
 | `olnm_offline` | 🔒 only one-liners that work without internet |
 | `olnm_net` | 🌍 names that need internet |
@@ -1199,7 +1231,6 @@ forge の操作関数（install / init / repo / issue / pr など）は NagoyAct
 | `olnm_reload` | 🔄 re-evaluate after edits or dial change |
 | `olnm_edit` | 📝 open olnm.py in $EDITOR |
 | `olnm_update` | ⬇️ 🌍 re-download olnm.py from $OLNM_URL and reload |
-| `olnm_steps` | 🔢 non-blank lines of olnm.py |
 
 ### uv
 
@@ -1208,8 +1239,10 @@ forge の操作関数（install / init / repo / issue / pr など）は NagoyAct
 | `uvtest` | 🧪 run unittest discover (locked env) |
 | `uvcheck` | ✅ ruff check then unittest |
 | `uvdeps` | 🌳 dependency tree + pip check |
+| `uvsync` | 🔒 install exactly what uv.lock says (fails if the lock is stale) |
 | `uvup` | ⬆️ 🌍 upgrade one package in lock and sync (uvup requests) |
 | `uvupall` | ⬆️ 🌍 upgrade every locked package and sync |
+| `uvout` | 🕰️ 🌍 direct dependencies that have a newer release |
 | `uvinit` | 🆕 new project in current dir (uvinit [name]) |
 | `uvadd` | ➕ 🌍 add package(s) and sync |
 | `uvdev` | ➕ 🌍 add dev package(s) |
@@ -1224,57 +1257,50 @@ forge の操作関数（install / init / repo / issue / pr など）は NagoyAct
 
 | 関数 | 説明 |
 |---|---|
-| `pyv` | 🐍 python version + path |
 | `pyhttp` | 🌐 serve current dir over http (pyhttp [port=8000]) |
-| `pyjson` | 📐 pretty-print json from file or stdin |
+| `calc` | 🧮 quote-free numeric arithmetic (calc 6 mul 7; calc --engine node 2 pow 10) |
+| `yourself` | 🧾 bundled standard-library environment report; no separate file or registration |
 | `xprobe` | 📦 single-file xprobe via uv's cached, pinned tool environment |
 | `cli_args` | 📦 single-file CLI argument helpers via uv's cached tool environment |
 | `ghi` | 📦 single-file gh_identity CLI via uv's cached tool environment |
 | `markdown` | 📦 single-file Markdown stdio CLI via uv's cached tool environment |
 | `ascii_artist` | 📦 single-file ASCII CLI via uv's cached tool environment |
-| `yourself` | 🧾 bundled standard-library environment report; no separate file or registration |
-| `calc` | 🧮 共通の数値計算（`calc 6 mul 7`、`calc --engine node 2 pow 10`） |
 | `pyimp` | 📥 check if module is importable and where (pyimp numpy) |
 | `pymods` | 📦 list top-level importable third-party modules |
 | `pytest1` | 🧪 run unittest discover with plain python |
 | `pyprof` | 🔬 cProfile a script sorted by cumulative time |
 | `pyvenv` | 🧵 create .venv and print activate hint |
 | `pycsv` | 📄 show head of csv as aligned table (pycsv file.csv [n=10]) |
-| `pyhash` | 🔐 sha256 of a file |
-| `pyepoch` | 🕰️ epoch seconds → iso (pyepoch 1700000000) or now |
 | `pyclean` | 🧹 remove __pycache__ and .pyc under cwd |
 
 ### node
 
 | 関数 | 説明 |
 |---|---|
-| `nv` | 🟩 node / npm / npx versions |
 | `nls` | 📜 top-level installed packages |
+| `ni` | 📦 🌍 npm install (ni [pkg…]) |
+| `nt` | 🧪 npm test |
 | `nout` | 🕰️ 🌍 outdated packages |
 | `nup` | ⬆️ 🌍 update deps within semver range |
 | `nupall` | ⬆️ 🌍 bump every dep to latest (npm-check-updates) |
 | `nr` | 🚀 npm run <script> (nr build) |
 | `nscripts` | 📋 list package.json scripts |
-| `nclean` | 🧹 remove node_modules + lock and reinstall |
+| `nclean` | 🧹 🌍 remove node_modules + lock and reinstall |
 | `naudit` | 🛡️ 🌍 audit and auto-fix |
 | `nwhy` | 📦 why is a package installed (nwhy lodash) |
 | `ninfo` | 🔢 🌍 show latest versions of a package (ninfo react) |
-| `njson` | 📐 pretty-print json via node |
-| `nhttp` | 🌐 serve current dir with node stdlib only (nhttp [port=3000]) |
 | `nlts` | 🟩 🌍 install/use Node LTS via nvm or fnm if present |
 
 ### bun
 
 | 関数 | 説明 |
 |---|---|
-| `bv` | 🥟 bun version |
 | `bi` | 📦 🌍 bun install |
 | `ba` | ➕ 🌍 bun add |
 | `br` | 🚀 bun run <script\|file> |
 | `bt` | 🧪 bun test |
 | `bx` | 🚀 🌍 bunx (run package binary) |
 | `bup` | ⬆️ 🌍 bun upgrade (self) + bun update (deps) |
-| `bjson` | 📐 pretty-print json via bun |
 | `bbuild` | 🏗️ bundle entry to dist/ (bbuild src/index.ts) |
 
 ### git
@@ -1289,6 +1315,7 @@ forge の操作関数（install / init / repo / issue / pr など）は NagoyAct
 | `gp` | 🚀 push current branch to origin (dial decides where), set upstream |
 | `gpf` | 🚀 force-push to origin safely (with-lease) |
 | `gpl` | ⬇️ pull from origin with rebase + autostash |
+| `gsync` | 🔄 fetch origin and rebase this branch onto its default branch (autostash) |
 | `gcb` | 🌱 create and switch to branch (gcb feat/x) |
 | `gco` | 🔀 switch branch (fzf picker when no arg) |
 | `gbr` | 🌳 branches sorted by last commit |
@@ -1305,6 +1332,7 @@ forge の操作関数（install / init / repo / issue / pr など）は NagoyAct
 | `gstat` | 📊 commit count per author |
 | `groot` | 🔙 cd to repo root |
 | `gstash` | 🧳 stash incl. untracked with message (gstash "msg") |
+| `gpop` | 🧳 re-apply the latest stash and drop it |
 | `gsearch` | 🔍 search commit messages (gsearch fix) |
 | `gchanged` | 🧾 files changed in last n commits (gchanged [n=1]) |
 
@@ -1322,8 +1350,11 @@ forge の操作関数（install / init / repo / issue / pr など）は NagoyAct
 | `ghweb` | 🌐 🎛️ open repo in browser (local forge at offline..mirror) |
 | `ghruns` | 🏃 🌍 recent workflow runs |
 | `ghwatch` | 👀 🌍 watch latest workflow run |
+| `ghchecks` | ✅ 🌍 CI checks of the current PR (ghchecks [num]) |
+| `ghrerun` | 🔁 🌍 re-run only the failed jobs of this branch's latest workflow run |
 | `ghclone` | 📥 🌍 clone by owner/repo (ghclone owner/repo) |
 | `ghrel` | 📦 🌍 list releases |
+| `ghlint` | 🔍 lint .github/workflows via `nagoyaction actionlint` (best effort without GitHub; ghlint --strict) |
 
 ### files
 
@@ -1357,8 +1388,9 @@ forge の操作関数（install / init / repo / issue / pr など）は NagoyAct
 
 | 関数 | 説明 |
 |---|---|
-| `jsonf` | 📐 pretty-print json (jq → python fallback) |
+| `jsonf` | 📐 pretty-print json from file or stdin (jq, else python: same 2-space output) |
 | `jsonmin` | 📐 minify json |
+| `jget` | 🔎 read one value from json without jq (jget a.b.0 < file.json) |
 | `y2j` | 🔁 🌍(first run) yaml → json via uvx pyyaml |
 | `j2y` | 🔁 🌍(first run) json → yaml via uvx pyyaml |
 | `t2j` | 🔁 toml → json (stdlib tomllib) |
@@ -1383,7 +1415,7 @@ forge の操作関数（install / init / repo / issue / pr など）は NagoyAct
 | `nums` | 🔢 sum / avg / min / max of numeric stdin |
 | `datef` | 📅 today as YYYYMMDD (datef) or custom fmt (datef %F) |
 | `ts` | ⏱️ current timestamp YYYYmmdd_HHMMSS (for file names) |
-| `epoch` | 🕰️ unix epoch now |
+| `epoch` | 🕰️ unix epoch now, or epoch seconds → iso (epoch 1700000000) |
 
 ### net
 
@@ -1416,6 +1448,8 @@ forge の操作関数（install / init / repo / issue / pr など）は NagoyAct
 | `disk` | 💽 disk usage of mounts |
 | `top1` | 🔥 top 10 by cpu |
 | `topm` | 🔥 top 10 by memory |
+| `svc` | 🩺 systemd unit status without the pager (svc ssh) |
+| `jlog` | 📜 follow a unit's journal (jlog ssh [n=100]) |
 | `path` | 🛤️ PATH entries one per line |
 | `addpath` | 🛤️ prepend dir to PATH for this shell |
 | `which1` | 🔎 resolve a command fully (which1 python3) |
@@ -1427,7 +1461,7 @@ forge の操作関数（install / init / repo / issue / pr など）は NagoyAct
 | `retry` | 🔁 retry until success, max n (retry 5 curl ...) |
 | `notify` | 🔔 beep + message when a command ends (notify make) |
 | `sysinfo` | 🧾 os, kernel, cpu, mem, uptime one-shot |
-| `ver` | 🧰 versions of the usual toolchain |
+| `ver` | 🧰 version + path of the usual toolchain, or of the named tools (ver node bun) |
 | `cleanup` | 🧹 clear apt/npm/uv/pip caches |
 | `alias1` | 📋 print a help line + function to paste into olnm.py (alias1 ll "ls -la") |
 
@@ -1444,6 +1478,8 @@ forge の操作関数（install / init / repo / issue / pr など）は NagoyAct
 | `npack` | 📦 pack current package into a tarball for transfer |
 | `gbundle` | 🎒 git bundle of all refs for sneakernet (gbundle out.bundle) |
 | `gunbundle` | 📥 clone from bundle (gunbundle repo.bundle dir) |
+| `dsave` | 🎒 save a docker image to a .tar.gz for carrying (dsave nginx:1.27 [file.tar.gz]) |
+| `dload` | 📥 load a carried image archive (dload nginx_1.27.tar.gz) |
 | `hashdir` | 🧾 write SHA256SUMS manifest of a dir (hashdir [dir=.]) |
 | `verifydir` | ✅ verify dir against its SHA256SUMS |
 | `dirdiff` | 🔍 which files differ between two trees (dirdiff a b) |
@@ -1465,7 +1501,6 @@ forge の操作関数（install / init / repo / issue / pr など）は NagoyAct
 |---|---|
 | `hubdial` | 🏠 local GitHub-like forge via `nagoyaction hub` (hubdial install \| init \| up \| down \| status \| repo \| issue \| pr \| labels \| sync \| api) |
 | `hubadd` | 📚 register cwd in the local forge (hubadd [--github owner/name]) |
-| `hubsync` | 🔄 push every registered repo to bare / local / github (github at mirror and up) |
 | `hubopen` | 🌐 open the local forge in a browser (or print its URL) |
 
 ### docker
@@ -1473,7 +1508,6 @@ forge の操作関数（install / init / repo / issue / pr など）は NagoyAct
 | 関数 | 説明 |
 |---|---|
 | `dps` | 🐳 running containers, compact |
-| `dpsa` | 🐳 all containers |
 | `dsh` | 🐚 shell into container (dsh name) |
 | `dlog` | 📜 follow logs (dlog name) |
 | `dclean` | 🧹 prune stopped containers, dangling images, networks |
@@ -1514,5 +1548,4 @@ forge の操作関数（install / init / repo / issue / pr など）は NagoyAct
 | `misels` | 📋 list mise tool versions and configuration sources |
 | `miselock` | 🔒 🌍 create or refresh mise.lock versions, checksums and download URLs |
 | `misedoctor` | 🩺 diagnose mise installation and configuration |
-
 <!-- shell-catalog:end -->

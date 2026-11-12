@@ -72,10 +72,10 @@ class TestReadmeInvocation(IsolatedInvocation):
         self.assertTrue(all(row["section"] == "python" and not row["net"] for row in rows))
 
     def test_run_inherits_stdin_cwd_and_preserves_space_arguments(self):
-        result = self.cli("run", "pyjson", input='{"answer":42}')
+        result = self.cli("run", "jsonf", input='{"answer":42}')
         self.assertEqual(json.loads(result.stdout), {"answer": 42})
         (self.work / "file with spaces.json").write_text('{"answer":42}')
-        result = self.cli("run", "pyjson", "file with spaces.json")
+        result = self.cli("run", "jsonf", "file with spaces.json")
         self.assertEqual(json.loads(result.stdout), {"answer": 42})
         result = self.cli("calc", "6 mul 7")
         self.assertEqual(result.stdout.strip(), "42")
