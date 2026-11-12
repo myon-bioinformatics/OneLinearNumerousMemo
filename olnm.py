@@ -4,6 +4,7 @@
     curl -fsSL <RAW_URL>/olnm.py -o ~/.olnm.py && echo 'eval "$(python3 ~/.olnm.py init)"' >> ~/.bashrc   # or ~/.zshrc
 
     olnm            📖 list            olnm git        📖 one section
+    olnm_show gp     👁️ read a one-liner before running it
     olnm_like uvtets 🤔 closest names  olnm_dial mirror  🎛️ 🔌 offline · 🏠 local · 🔁 mirror · ☁️ github (stored as 0-3)
     hubdial status / up / repo add   🏠 local forge → `nagoyaction hub …` (NagoyAction) · ghpr/ghis go there at offline..mirror
 
@@ -41,11 +42,13 @@ SECTION = re.compile(r"^# ─+ (\S+) (\S+) ─+$")
 # ───────────────────────── 📖 meta (shell shims → this file) ─────────────────────────
 META = r"""
 # 📖 olnm: list one-liners (olnm git = one section)
-olnm() { if [ "$#" -eq 1 ]; then case " $_OLNM_SECTIONS " in *" $1 "*) python3 "$OLNM_PY" ls "$@"; return $?;; esac; fi; case "${1-}" in -h|--help|init|ls|grep|like|sections|net|doctor|dial|run|call|hub|complete|calc|tools|mise|yourself|xprobe|cli_args|ghi|markdown|ascii_artist) python3 "$OLNM_PY" "$@";; *) python3 "$OLNM_PY" ls "$@";; esac; }
+olnm() { if [ "$#" -eq 1 ]; then case " $_OLNM_SECTIONS " in *" $1 "*) python3 "$OLNM_PY" ls "$@"; return $?;; esac; fi; case " -h --help $_OLNM_COMMANDS " in *" ${1-} "*) python3 "$OLNM_PY" "$@";; *) python3 "$OLNM_PY" ls "$@";; esac; }
 # 🔎 olnm_grep: search help text (olnm_grep json)
 olnm_grep() { python3 "$OLNM_PY" grep "$@"; }
 # 🤔 olnm_like: closest names to a typo or fragment (olnm_like uvtets)
 olnm_like() { python3 "$OLNM_PY" like "$@"; }
+# 👁️ olnm_show: print a one-liner's definition before running it (olnm_show gp)
+olnm_show() { python3 "$OLNM_PY" show "$@"; }
 # 🗂️ olnm_sections: section names
 olnm_sections() { python3 "$OLNM_PY" sections; }
 # 🔒 olnm_offline: only one-liners that work without internet
@@ -57,13 +60,11 @@ olnm_dial() { python3 "$OLNM_PY" dial "$@" && olnm_reload >/dev/null; }
 # 🩺 olnm_doctor: which tools are present
 olnm_doctor() { python3 "$OLNM_PY" doctor; }
 # 🔄 olnm_reload: re-evaluate after edits or dial change
-olnm_reload() { eval "$(python3 "$OLNM_PY" init)" && echo "🔄 $OLNM_PY"; }
+olnm_reload() { eval "$(python3 "$OLNM_PY" init "$([ -n "${ZSH_VERSION-}" ] && echo zsh || echo bash)")" && echo "🔄 $OLNM_PY"; }
 # 📝 olnm_edit: open olnm.py in $EDITOR
 olnm_edit() { "${EDITOR:-vi}" "$OLNM_PY" && olnm_reload; }
 # ⬇️ olnm_update: 🌍 re-download olnm.py from $OLNM_URL and reload
 olnm_update() { [ -n "${OLNM_URL:-}" ] || { printf '%s\n' 'File install: set OLNM_URL to the reviewed raw olnm.py URL, then olnm_update.' 'uv tool install: use uv tool upgrade one-linear-numerous-memo; then eval "$(command olnm init)".' >&2; return 1; }; curl -fsSL "$OLNM_URL" -o "$OLNM_PY.new" && python3 "$OLNM_PY.new" --help >/dev/null && mv "$OLNM_PY.new" "$OLNM_PY" && olnm_reload; }
-# 🔢 olnm_steps: non-blank lines of olnm.py
-olnm_steps() { grep -cve '^\s*$' "$OLNM_PY"; }
 _olnm_d() { cat "$DIAL_FILE" 2>/dev/null || echo 3; }
 _olnm_hub() { [ "$(_olnm_d)" -le 2 ] && [ -f "$OLNM_HOME/forge/state.json" ]; }
 _olnm_cnf() { python3 "$OLNM_PY" like "$1" --hint >&2; return 127; }
@@ -78,10 +79,14 @@ uvtest() { uv run --locked python -m unittest discover "$@"; }
 uvcheck() { uv run --locked ruff check . && uvtest; }
 # 🌳 uvdeps: dependency tree + pip check
 uvdeps() { uv tree && uv pip check; }
+# 🔒 uvsync: install exactly what uv.lock says (fails if the lock is stale)
+uvsync() { uv sync --locked "$@"; }
 # ⬆️ uvup: 🌍 upgrade one package in lock and sync (uvup requests)
 uvup() { uv lock --upgrade-package "$1" && uv sync; }
 # ⬆️ uvupall: 🌍 upgrade every locked package and sync
 uvupall() { uv lock --upgrade && uv sync; }
+# 🕰️ uvout: 🌍 direct dependencies that have a newer release
+uvout() { uv tree --outdated --depth 1 "$@"; }
 # 🆕 uvinit: new project in current dir (uvinit [name])
 uvinit() { uv init ${1:+--name "$1"} && uv sync; }
 # ➕ uvadd: 🌍 add package(s) and sync
@@ -93,7 +98,7 @@ uvpy() { uv run --locked python "$@"; }
 # 🎨 uvfmt: 🌍(first run) ruff format + ruff fix
 uvfmt() { uvx ruff format . && uvx ruff check --fix .; }
 # 🧹 uvclean: remove .venv, caches, build dirs
-uvclean() { rm -rf .venv .ruff_cache .pytest_cache .mypy_cache build dist ./*.egg-info; find . -name __pycache__ -type d -prune -exec rm -rf {} +; }
+uvclean() { rm -rf .venv .ruff_cache .pytest_cache .mypy_cache build dist ./*.egg-info; pyclean; }
 # 📦 uvbuild: build sdist+wheel into dist/
 uvbuild() { uv build "$@"; }
 # 🔁 uvresync: 🌍 delete lock and resolve from scratch
@@ -102,12 +107,8 @@ uvresync() { rm -f uv.lock && uv lock && uv sync; }
 uvpys() { if [ "$#" -gt 0 ]; then uv python install "$@"; else uv python list --only-installed; fi; }
 
 # ───────────────────────── 🐍 python ─────────────────────────
-# 🐍 pyv: python version + path
-pyv() { python3 --version && command -v python3; }
 # 🌐 pyhttp: serve current dir over http (pyhttp [port=8000])
 pyhttp() { python3 -m http.server "${1:-8000}"; }
-# 📐 pyjson: pretty-print json from file or stdin
-pyjson() { python3 -m json.tool "$@"; }
 # 🧮 calc: quote-free numeric arithmetic (calc 6 mul 7; calc --engine node 2 pow 10)
 calc() { python3 "$OLNM_PY" calc "$@"; }
 # 🧾 yourself: bundled standard-library environment report; no separate file or registration
@@ -134,18 +135,16 @@ pyprof() { python3 -m cProfile -s cumulative "$@" | head -40; }
 pyvenv() { python3 -m venv .venv && echo 'source .venv/bin/activate'; }
 # 📄 pycsv: show head of csv as aligned table (pycsv file.csv [n=10])
 pycsv() { python3 -c "import csv,sys; r=csv.reader(open(sys.argv[1])); [print(' | '.join(x)) for _,x in zip(range(int(sys.argv[2])), r)]" "$1" "${2:-10}"; }
-# 🔐 pyhash: sha256 of a file
-pyhash() { python3 -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$1"; }
-# 🕰️ pyepoch: epoch seconds → iso (pyepoch 1700000000) or now
-pyepoch() { python3 -c "import sys,datetime as d; t=float(sys.argv[1]) if len(sys.argv)>1 else d.datetime.now().timestamp(); print(d.datetime.fromtimestamp(t).isoformat())" "$@"; }
 # 🧹 pyclean: remove __pycache__ and .pyc under cwd
 pyclean() { find . -name '__pycache__' -type d -prune -exec rm -rf {} + ; find . -name '*.pyc' -delete; }
 
 # ───────────────────────── 🟩 node ─────────────────────────
-# 🟩 nv: node / npm / npx versions
-nv() { node -v && npm -v && command -v node; }
 # 📜 nls: top-level installed packages
 nls() { npm ls --depth=0 "$@"; }
+# 📦 ni: 🌍 npm install (ni [pkg…])
+ni() { npm install "$@"; }
+# 🧪 nt: npm test
+nt() { npm test "$@"; }
 # 🕰️ nout: 🌍 outdated packages
 nout() { npm outdated "$@"; }
 # ⬆️ nup: 🌍 update deps within semver range
@@ -156,7 +155,7 @@ nupall() { npx -y npm-check-updates -u && npm install; }
 nr() { npm run "$@"; }
 # 📋 nscripts: list package.json scripts
 nscripts() { node -e 'const s=require("./package.json").scripts||{};for(const k in s)console.log(k.padEnd(16),s[k])'; }
-# 🧹 nclean: remove node_modules + lock and reinstall
+# 🧹 nclean: 🌍 remove node_modules + lock and reinstall
 nclean() { rm -rf node_modules package-lock.json && npm install; }
 # 🛡️ naudit: 🌍 audit and auto-fix
 naudit() { npm audit fix "$@"; }
@@ -164,16 +163,10 @@ naudit() { npm audit fix "$@"; }
 nwhy() { npm explain "$1"; }
 # 🔢 ninfo: 🌍 show latest versions of a package (ninfo react)
 ninfo() { npm view "$1" version dist-tags.latest time.modified; }
-# 📐 njson: pretty-print json via node
-njson() { node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>console.log(JSON.stringify(JSON.parse(d),null,2)))'; }
-# 🌐 nhttp: serve current dir with node stdlib only (nhttp [port=3000])
-nhttp() { node -e 'const h=require("http"),f=require("fs"),p=require("path");h.createServer((q,r)=>{const u=decodeURIComponent(q.url.split("?")[0]);let x=p.join(process.cwd(),u);if(f.existsSync(x)&&f.statSync(x).isDirectory())x=p.join(x,"index.html");f.readFile(x,(e,d)=>{r.writeHead(e?404:200);r.end(e?"404":d)})}).listen(+process.argv[1],()=>console.log("http://localhost:"+process.argv[1]))' "${1:-3000}"; }
 # 🟩 nlts: 🌍 install/use Node LTS via nvm or fnm if present
 nlts() { command -v fnm >/dev/null && fnm install --lts && fnm use lts-latest || { [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" && nvm install --lts && nvm use --lts; } || echo "need fnm or nvm"; }
 
 # ───────────────────────── 🥟 bun ─────────────────────────
-# 🥟 bv: bun version
-bv() { bun -v; }
 # 📦 bi: 🌍 bun install
 bi() { bun install "$@"; }
 # ➕ ba: 🌍 bun add
@@ -186,8 +179,6 @@ bt() { bun test "$@"; }
 bx() { bunx "$@"; }
 # ⬆️ bup: 🌍 bun upgrade (self) + bun update (deps)
 bup() { bun upgrade && bun update; }
-# 📐 bjson: pretty-print json via bun
-bjson() { bun -e 'const d=await Bun.stdin.text();console.log(JSON.stringify(JSON.parse(d),null,2))'; }
 # 🏗️ bbuild: bundle entry to dist/ (bbuild src/index.ts)
 bbuild() { bun build "$@" --outdir dist; }
 
@@ -208,6 +199,8 @@ gp() { git push -u origin "$(git branch --show-current)" "$@"; }
 gpf() { git push --force-with-lease "$@"; }
 # ⬇️ gpl: pull from origin with rebase + autostash
 gpl() { git pull --rebase --autostash "$@"; }
+# 🔄 gsync: fetch origin and rebase this branch onto its default branch (autostash)
+gsync() { local b; b="$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)"; git fetch origin && git rebase --autostash "${b:-origin/main}"; }
 # 🌱 gcb: create and switch to branch (gcb feat/x)
 gcb() { git switch -c "$1"; }
 # 🔀 gco: switch branch (fzf picker when no arg)
@@ -240,6 +233,8 @@ gstat() { git shortlog -sn --all "$@"; }
 groot() { cd "$(git rev-parse --show-toplevel)" || return; }
 # 🧳 gstash: stash incl. untracked with message (gstash "msg")
 gstash() { git stash push -u -m "${*:-stash $(date +%T)}"; }
+# 🧳 gpop: re-apply the latest stash and drop it
+gpop() { git stash pop "$@"; }
 # 🔍 gsearch: search commit messages (gsearch fix)
 gsearch() { git log --oneline --all -i --grep="$*"; }
 # 🧾 gchanged: files changed in last n commits (gchanged [n=1])
@@ -266,10 +261,16 @@ ghweb() { _olnm_hub && { hubopen; return; }; gh repo view --web; }
 ghruns() { gh run list --limit "${1:-10}"; }
 # 👀 ghwatch: 🌍 watch latest workflow run
 ghwatch() { gh run watch "$(gh run list --limit 1 --json databaseId -q '.[0].databaseId')"; }
+# ✅ ghchecks: 🌍 CI checks of the current PR (ghchecks [num])
+ghchecks() { gh pr checks "$@"; }
+# 🔁 ghrerun: 🌍 re-run only the failed jobs of this branch's latest workflow run
+ghrerun() { gh run rerun "$(gh run list --branch "$(git branch --show-current)" --limit 1 --json databaseId -q '.[0].databaseId')" --failed; }
 # 📥 ghclone: 🌍 clone by owner/repo (ghclone owner/repo)
 ghclone() { gh repo clone "$@"; }
 # 📦 ghrel: 🌍 list releases
 ghrel() { gh release list "$@"; }
+# 🔍 ghlint: lint .github/workflows via `nagoyaction actionlint` (best effort without GitHub; ghlint --strict)
+ghlint() { python3 "$OLNM_PY" actionlint "$@"; }
 
 # ───────────────────────── 📁 files ─────────────────────────
 # 📁 mkcd: mkdir -p and cd
@@ -320,10 +321,12 @@ dos2unix1() { sed -i 's/\r$//' "$@"; }
 touchp() { mkdir -p "$(dirname "$1")" && touch "$1"; }
 
 # ───────────────────────── 🔤 text ─────────────────────────
-# 📐 jsonf: pretty-print json (jq → python fallback)
-jsonf() { if command -v jq >/dev/null; then jq . "$@"; else pyjson "$@"; fi; }
+# 📐 jsonf: pretty-print json from file or stdin (jq, else python: same 2-space output)
+jsonf() { if command -v jq >/dev/null; then jq . "$@"; else python3 -m json.tool --no-ensure-ascii --indent 2 "$@"; fi; }
 # 📐 jsonmin: minify json
 jsonmin() { command -v jq >/dev/null && jq -c . "$@" || python3 -c 'import json,sys;print(json.dumps(json.load(sys.stdin),separators=(",",":")))'; }
+# 🔎 jget: read one value from json without jq (jget a.b.0 < file.json)
+jget() { python3 -c 'import functools,json,sys; v=functools.reduce(lambda d,k: d[int(k)] if isinstance(d,list) else d[k], [k for k in sys.argv[1].split(".") if k], json.load(sys.stdin)); print(v if isinstance(v,str) else json.dumps(v,ensure_ascii=False))' "${1-}"; }
 # 🔁 y2j: 🌍(first run) yaml → json via uvx pyyaml
 y2j() { uvx --from pyyaml python -c 'import sys,yaml,json;print(json.dumps(yaml.safe_load(sys.stdin),indent=2,ensure_ascii=False))' < "${1:-/dev/stdin}"; }
 # 🔁 j2y: 🌍(first run) json → yaml via uvx pyyaml
@@ -372,8 +375,8 @@ nums() { awk '{s+=$1; if(NR==1||$1<mn)mn=$1; if(NR==1||$1>mx)mx=$1} END{if(NR)pr
 datef() { date +"${1:-%Y%m%d}"; }
 # ⏱️ ts: current timestamp YYYYmmdd_HHMMSS (for file names)
 ts() { date +%Y%m%d_%H%M%S; }
-# 🕰️ epoch: unix epoch now
-epoch() { date +%s; }
+# 🕰️ epoch: unix epoch now, or epoch seconds → iso (epoch 1700000000)
+epoch() { if [ "$#" -gt 0 ]; then date -d "@$1" -Iseconds; else date +%s; fi; }
 
 # ───────────────────────── 🌐 net ─────────────────────────
 # 🌐 myip: 🌍 public ip
@@ -422,6 +425,10 @@ disk() { df -h -x tmpfs -x devtmpfs -x squashfs; }
 top1() { ps -eo pid,pcpu,pmem,comm --sort=-pcpu | head -11; }
 # 🔥 topm: top 10 by memory
 topm() { ps -eo pid,pcpu,pmem,comm --sort=-pmem | head -11; }
+# 🩺 svc: systemd unit status without the pager (svc ssh)
+svc() { systemctl status --no-pager "$@"; }
+# 📜 jlog: follow a unit's journal (jlog ssh [n=100])
+jlog() { journalctl -u "$1" -n "${2:-100}" -f; }
 # 🛤️ path: PATH entries one per line
 path() { printf '%s\n' "${PATH//:/$'\n'}"; }
 # 🛤️ addpath: prepend dir to PATH for this shell
@@ -444,8 +451,8 @@ retry() { local n=$1 i=0; shift; until "$@"; do i=$((i+1)); [ "$i" -ge "$n" ] &&
 notify() { "$@"; local r=$?; printf '\a%s %s\n' "$([ $r = 0 ] && echo ✅ || echo ❌)" "$*"; return $r; }
 # 🧾 sysinfo: os, kernel, cpu, mem, uptime one-shot
 sysinfo() { . /etc/os-release 2>/dev/null; echo "🖥️ ${PRETTY_NAME:-?} | $(uname -r) | $(nproc) cpu | $(free -h | awk '/Mem/{print $2}') | $(uptime -p 2>/dev/null)"; }
-# 🧰 ver: versions of the usual toolchain
-ver() { for t in python3 uv node npm bun git gh; do command -v "$t" >/dev/null && printf '%-8s %s\n' "$t" "$("$t" --version 2>&1 | head -1)"; done; }
+# 🧰 ver: version + path of the usual toolchain, or of the named tools (ver node bun)
+ver() { [ "$#" -gt 0 ] || set -- python3 uv node npm bun git gh; local t p; for t in "$@"; do if p="$(command -v "$t")"; then printf '%-8s %s  %s\n' "$t" "$("$t" --version 2>&1 | head -1)" "$p"; else printf '%-8s ❌ not on PATH\n' "$t"; fi; done; }
 # 🧹 cleanup: clear apt/npm/uv/pip caches
 cleanup() { sudo apt clean; npm cache clean --force 2>/dev/null; uv cache clean 2>/dev/null; pip cache purge 2>/dev/null; echo "🧹 done"; }
 # 📋 alias1: print a help line + function to paste into olnm.py (alias1 ll "ls -la")
@@ -470,6 +477,10 @@ npack() { npm pack --pack-destination "${1:-.}"; }
 gbundle() { git bundle create "${1:-repo.bundle}" --all && git bundle verify "${1:-repo.bundle}"; }
 # 📥 gunbundle: clone from bundle (gunbundle repo.bundle dir)
 gunbundle() { git clone "$1" "${2:-${1%.bundle}}"; }
+# 🎒 dsave: save a docker image to a .tar.gz for carrying (dsave nginx:1.27 [file.tar.gz])
+dsave() { local f="${2:-$(printf '%s' "$1" | tr '/:' '__').tar.gz}"; docker save "$1" -o "${f%.gz}" && gzip -f "${f%.gz}" && ls -lh "$f"; }
+# 📥 dload: load a carried image archive (dload nginx_1.27.tar.gz)
+dload() { docker load -i "$1"; }
 # 🧾 hashdir: write SHA256SUMS manifest of a dir (hashdir [dir=.])
 hashdir() { (cd "${1:-.}" && find . -type f -not -path './.git/*' -not -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS && wc -l SHA256SUMS); }
 # ✅ verifydir: verify dir against its SHA256SUMS
@@ -504,16 +515,12 @@ pyfreeze() { uv pip freeze 2>/dev/null || python3 -m pip freeze; }
 hubdial() { python3 "$OLNM_PY" hub "$@"; }
 # 📚 hubadd: register cwd in the local forge (hubadd [--github owner/name])
 hubadd() { hubdial repo add . "$@"; }
-# 🔄 hubsync: push every registered repo to bare / local / github (github at mirror and up)
-hubsync() { hubdial sync; }
 # 🌐 hubopen: open the local forge in a browser (or print its URL)
 hubopen() { local u; u="$(python3 "$OLNM_PY" call hub_url | tr -d '"')"; command -v xdg-open >/dev/null && xdg-open "$u" >/dev/null 2>&1 || echo "$u"; }
 
 # ───────────────────────── 🐳 docker ─────────────────────────
 # 🐳 dps: running containers, compact
 dps() { docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' "$@"; }
-# 🐳 dpsa: all containers
-dpsa() { dps -a; }
 # 🐚 dsh: shell into container (dsh name)
 dsh() { docker exec -it "$1" sh -c 'command -v bash >/dev/null && exec bash || exec sh'; }
 # 📜 dlog: follow logs (dlog name)
@@ -591,6 +598,11 @@ def names() -> list[str]:
     return [e["name"] for e in entries()]
 
 
+def _commands() -> list[str]:
+    """CLI subcommand names, straight from the parser."""
+    return list(next(a.choices for a in build_parser()._actions if isinstance(a, argparse._SubParsersAction)))
+
+
 def _sections() -> list[str]:
     return ["meta"] + [m.group(2) for m in map(SECTION.match, SHELL.splitlines()) if m]
 
@@ -616,8 +628,7 @@ def ls(section: str | None = None, offline: bool = False) -> list[dict]:
     if section and not rows:
         print(f"🤔 no section {section!r} → {' '.join(_sections())}")
         if section not in _sections():
-            commands = next(a.choices for a in build_parser()._actions if isinstance(a, argparse._SubParsersAction))
-            candidates = difflib.get_close_matches(section, [*_sections(), *commands], n=3, cutoff=0.5)
+            candidates = difflib.get_close_matches(section, list(dict.fromkeys([*_sections(), *_commands()])), n=3, cutoff=0.5)
             if candidates:
                 print("did you mean: " + ", ".join(candidates) + "? Use olnm ls SECTION or olnm COMMAND --help", file=sys.stderr)
     for e in rows:
@@ -634,8 +645,16 @@ def grep(*words: str) -> list[dict]:
     return rows
 
 
+# names merged into another one-liner: the typo hint says where they went
+_MOVED = {"pyjson": "jsonf", "njson": "jsonf", "bjson": "jsonf", "pyhash": "sha", "pyepoch": "epoch", "pyv": "ver python3", "nv": "ver node npm",
+          "bv": "ver bun", "nhttp": "pyhttp", "dpsa": "dps -a", "hubsync": "hubdial sync", "olnm_steps": "loc py"}
+
+
 def like(word: str, hint: bool = False, n: int = 6) -> list[str]:
     """Closest names: substring hits first, then difflib similarity ≥0.5."""
+    if hint and word in _MOVED:
+        print(f"🤔 {word} was merged → use: {_MOVED[word]}")
+        return [_MOVED[word].split()[0]]
     pool = names()
     hits = [x for x in pool if word.lower() in x.lower() and x != word]
     hits += [x for x in difflib.get_close_matches(word, pool, n, 0.5) if x not in hits]
@@ -645,6 +664,17 @@ def like(word: str, hint: bool = False, n: int = 6) -> list[str]:
     else:
         print("\n".join(hits))
     return hits
+
+
+def show(name: str) -> str:
+    """The help line and shell definition of one one-liner, to read before running it ("" + a hint when unknown)."""
+    found = re.search(rf"^# \S+ {re.escape(name)}: .*\n{re.escape(name)}\(\) \{{ .*$", META + SHELL, re.M)
+    if not found:
+        with contextlib.redirect_stdout(sys.stderr):
+            like(name, hint=True)
+        return ""
+    print(found.group(0))
+    return found.group(0)
 
 
 # ───────────────────────── 🎛️ dial ─────────────────────────
@@ -706,12 +736,14 @@ def dial(level: int | str | None = None) -> int:
 # ───────────────────────── 🏠 hub: handed over to NagoyAction (`nagoyaction hub …`) ─────────────────────────
 FORGE_STATE = OLNM_HOME / "forge" / "state.json"  # written by NagoyAction; olnm only checks it exists and reads the port
 HUB_SUBS = ("install", "bundle", "init", "up", "down", "status", "doctor", "logs", "dial", "repo", "api", "issue", "pr", "labels", "sync")
-NAGOYACTION_HINT = """\
-🏠 the local forge now lives in NagoyAction: olnm hub … runs `nagoyaction hub …`.
+_NAGOYA_HEAD = {"hub": "🏠 the local forge now lives in NagoyAction: olnm hub … runs `nagoyaction hub …`.",
+                "actionlint": "🔍 workflow lint lives in NagoyAction: olnm actionlint … runs `nagoyaction actionlint …`."}
+_NAGOYA_INSTALL = """\
    install:  git clone https://github.com/myon-bioinformatics/NagoyAction && cd NagoyAction
              python3 tools/build_uv_tool.py build/nagoyaction-tool && uv tool install ./build/nagoyaction-tool
    or point at a checkout:  export NAGOYACTION=/path/to/NagoyAction/nagoyaction.py
    closed network, from `hub bundle`:  export NAGOYACTION=/path/to/carry/local_forge.py"""
+NAGOYACTION_HINT = _NAGOYA_HEAD["hub"] + "\n" + _NAGOYA_INSTALL
 
 
 def _nagoyaction() -> list[str] | None:
@@ -721,13 +753,22 @@ def _nagoyaction() -> list[str] | None:
     return [found] if (found := shutil.which("nagoyaction")) else None
 
 
-def _forge(*args: str) -> int:
-    """`nagoyaction hub ARGS` with this terminal's stdio; 127 + install guidance when NagoyAction is missing."""
+def _nagoya(command: str, *args: str) -> int:
+    """`nagoyaction COMMAND ARGS` (hub | actionlint) with this terminal's stdio; 127 + install guidance when NagoyAction is missing."""
     if not (cmd := _nagoyaction()):
-        print(NAGOYACTION_HINT, file=sys.stderr)
+        print(_NAGOYA_HEAD[command] + "\n" + _NAGOYA_INSTALL, file=sys.stderr)
         return 127
-    direct = Path(cmd[-1]).name in ("local_forge.py", "local-forge")  # the forge alone (e.g. carried by `hub bundle`) takes SUB directly
-    return subprocess.run([*cmd, *([] if direct else ["hub"]), *args]).returncode
+    if Path(cmd[-1]).name in ("local_forge.py", "local-forge"):  # the forge alone (e.g. carried by `hub bundle`) takes SUB directly
+        if command != "hub":
+            print(f"❌ {cmd[-1]} is the forge alone; olnm {command} needs nagoyaction (a NagoyAction checkout or its uv tool)", file=sys.stderr)
+            return 127
+        return subprocess.run([*cmd, *args]).returncode
+    return subprocess.run([*cmd, command, *args]).returncode
+
+
+def _forge(*args: str) -> int:
+    """`nagoyaction hub ARGS`."""
+    return _nagoya("hub", *args)
 
 
 def hub_url() -> str:
@@ -929,7 +970,7 @@ def _completion(words: list[str]) -> list[str]:
         return [n for n in ("bun@latest", "go@latest", "node@26", "uv@latest") if n.startswith(prefix)] if "--" not in tokens[:-1] and not prefix.startswith("-") else []
     if command == "olnm" and tokens[0] == "mise":
         return [n for n in ("doctor", "exec", "install", "lock", "ls", "use") if n.startswith(prefix)] if len(tokens) == 2 else []
-    if command in {"olnm_offline", "olnm_like"}:
+    if command in {"olnm_offline", "olnm_like", "olnm_show"}:
         pool = _sections() if command == "olnm_offline" else names()
         return sorted(n for n in pool if n.startswith(prefix))
     tokens = ({"hubdial": ["hub"], "olnm_dial": ["dial"]}.get(command, []) + tokens)
@@ -967,7 +1008,7 @@ def _completion(words: list[str]) -> list[str]:
             pool += _sections()
     elif action is not None and (path, action.dest) == (["ls"], "section"):
         pool = _sections()
-    elif action is not None and (path, action.dest) == (["run"], "name"):
+    elif action is not None and (path, action.dest) in ((["run"], "name"), (["show"], "name")):
         pool = names()
     elif action is not None and (path, action.dest) == (["call"], "fn"):
         pool = public()
@@ -988,14 +1029,14 @@ def init(shell: str | None = None) -> str:
     """Shell code to eval: functions + dial stubs + typo hook + completion."""
     shell = shell or ("zsh" if "zsh" in os.environ.get("SHELL", "") else "bash")
     # Quote literal paths; preserve only the intended environment overrides.
-    parts = [f'OLNM_PY={shlex.quote(str(PY))}', f'OLNM_HOME=${{OLNM_HOME:-{shlex.quote(str(OLNM_HOME))}}}', f'DIAL_FILE=${{DIAL_FILE:-{shlex.quote(str(DIAL_FILE))}}}', f'_OLNM_SECTIONS={shlex.quote(" ".join(_sections()))}', META]
+    parts = [f'OLNM_PY={shlex.quote(str(PY))}', f'OLNM_HOME=${{OLNM_HOME:-{shlex.quote(str(OLNM_HOME))}}}', f'DIAL_FILE=${{DIAL_FILE:-{shlex.quote(str(DIAL_FILE))}}}', f'_OLNM_SECTIONS={shlex.quote(" ".join(_sections()))}', f'_OLNM_COMMANDS={shlex.quote(" ".join(_commands()))}', META]
     guarded = SHELL
     for entry in entries():
         if entry["section"] in {"node", "bun"}:
             # Guard the executable actually used, not every optional tool in the section.
             body = re.search(r"^" + re.escape(entry["name"]) + r"\(\) \{ (.*)$", SHELL, re.M).group(1)
             executable = body.split()[0]
-            required = {"nv": "node npm npx", "nclean": "npm", "nupall": "npx npm"}.get(entry["name"], executable)
+            required = {"nclean": "npm", "nupall": "npx npm"}.get(entry["name"], executable)
             if required.split()[0] in {"node", "npm", "npx", "bun", "bunx"}:
                 head = f'{entry["name"]}() {{ '
                 guarded = guarded.replace(head, head + f'_olnm_require {required} || return $?; ', 1)
@@ -1004,6 +1045,22 @@ def init(shell: str | None = None) -> str:
         for e in entries():
             if e["net"]:
                 parts.append(f'{e["name"]}() {{ echo "🔌 {e["name"]}: 🌍 needs dial mirror or github (now {DIALS[lv]}) → olnm_dial mirror" >&2; return 1; }}')
+        # offline / local: uv and npm use only what is already cached, so they fail at once instead of waiting for a network
+        parts.append("""if [ -z "${_OLNM_OFFLINE-}" ]; then
+_OLNM_UV_WAS_SET=${UV_OFFLINE+x}; _OLNM_UV_PREVIOUS=${UV_OFFLINE-}
+_OLNM_NPM_WAS_SET=${npm_config_offline+x}; _OLNM_NPM_PREVIOUS=${npm_config_offline-}
+fi
+export UV_OFFLINE=1 npm_config_offline=true _OLNM_OFFLINE=1""")
+    else:  # back at mirror / github: undo only what olnm set
+        parts.append("""if [ -n "${_OLNM_OFFLINE-}" ]; then
+if [ "${UV_OFFLINE-}" = 1 ]; then
+if [ "${_OLNM_UV_WAS_SET-}" = x ]; then export UV_OFFLINE="$_OLNM_UV_PREVIOUS"; else unset UV_OFFLINE; fi
+fi
+if [ "${npm_config_offline-}" = true ]; then
+if [ "${_OLNM_NPM_WAS_SET-}" = x ]; then export npm_config_offline="$_OLNM_NPM_PREVIOUS"; else unset npm_config_offline; fi
+fi
+unset _OLNM_OFFLINE _OLNM_UV_WAS_SET _OLNM_UV_PREVIOUS _OLNM_NPM_WAS_SET _OLNM_NPM_PREVIOUS
+fi""")
     if shell == "zsh":
         parts.append('command_not_found_handler() { _olnm_cnf "$@"; }')
         parts.append(r'''_olnm_complete_zsh() {
@@ -1011,7 +1068,7 @@ def init(shell: str | None = None) -> str:
   candidates=("${(@f)$(python3 "$OLNM_PY" complete -- "${words[@]:0:$CURRENT}")}")
   (( ${#candidates} )) && compadd -- "${candidates[@]}"
 }
-(( $+functions[compdef] )) && compdef _olnm_complete_zsh olnm olnm_offline olnm_like olnm_dial hubdial miseuse miseglobal miseinstall miseexec miseoffline yourself
+if (( $+functions[compdef] )); then compdef _olnm_complete_zsh olnm olnm_offline olnm_like olnm_show olnm_dial hubdial miseuse miseglobal miseinstall miseexec miseoffline yourself; fi
 ''')
     else:
         parts.append('command_not_found_handle() { _olnm_cnf "$@"; }')
@@ -1020,7 +1077,7 @@ def init(shell: str | None = None) -> str:
   COMPREPLY=()
   while IFS= read -r candidate; do COMPREPLY+=("$candidate"); done < <(python3 "$OLNM_PY" complete -- "${COMP_WORDS[@]:0:COMP_CWORD+1}")
 }
-complete -o default -F _olnm_complete_bash olnm olnm_offline olnm_like olnm_dial hubdial miseuse miseglobal miseinstall miseexec miseoffline yourself
+complete -o default -F _olnm_complete_bash olnm olnm_offline olnm_like olnm_show olnm_dial hubdial miseuse miseglobal miseinstall miseexec miseoffline yourself
 ''')
     code = "\n".join(parts) + "\n"
     print(code, end="")
@@ -1195,6 +1252,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = sp.add_parser("ls", help="📖 list"); s.add_argument("section", nargs="?"); s.add_argument("--offline", action="store_true")
     s = sp.add_parser("grep", help="🔎 search"); s.add_argument("words", nargs="+")
     s = sp.add_parser("like", help="🤔 closest names"); s.add_argument("word"); s.add_argument("--hint", action="store_true")
+    s = sp.add_parser("show", help="👁️ print one one-liner's definition"); s.add_argument("name")
     sp.add_parser("sections", help="🗂️ sections"); sp.add_parser("net", help="🌍 internet-needing names"); sp.add_parser("doctor", help="🩺 tools")
     s = sp.add_parser("complete", help="Tab candidates (shell command and words, ending with current word)"); s.add_argument("words", nargs=argparse.REMAINDER)
     s = sp.add_parser("calc", help="🧮 arithmetic: words (6 mul 7) or symbols; no arguments prompts for an expression without shell quoting")
@@ -1212,6 +1270,9 @@ def build_parser() -> argparse.ArgumentParser:
                       epilog=NAGOYACTION_HINT, formatter_class=argparse.RawDescriptionHelpFormatter)
     s.add_argument("sub", choices=HUB_SUBS, metavar="sub", help=" | ".join(HUB_SUBS) + "; nagoyaction hub SUB --help for the rest")
     s.add_argument("args", nargs=argparse.REMAINDER)
+    s = sp.add_parser("actionlint", help="🔍 lint .github/workflows → nagoyaction actionlint (best effort without GitHub; --strict, --all)",
+                      epilog=_NAGOYA_HEAD["actionlint"] + "\n" + _NAGOYA_INSTALL, formatter_class=argparse.RawDescriptionHelpFormatter)
+    s.add_argument("args", nargs=argparse.REMAINDER)
     return ap
 
 
@@ -1225,6 +1286,8 @@ def main(argv: list[str] | None = None) -> int:
         # NagoyAction parses the rest (help, typos, exit codes). olnm keeps: unknown SUB hints, and --help before it is installed.
         if (not sub or sub.startswith("-") or sub in HUB_SUBS) and (sub not in ("-h", "--help") or _nagoyaction()):
             return _forge(*argv[1:])
+    if argv[:1] == ["actionlint"] and (not {"-h", "--help"} & set(argv[1:]) or _nagoyaction()):
+        return _nagoya("actionlint", *argv[1:])  # NagoyAction parses everything; olnm answers --help only before it is installed
     if argv[:1] == ["yourself"]:
         args = argv[1:]
         return yourself(*(args[1:] if args[:1] == ["--"] else args))
@@ -1245,6 +1308,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2 if a.section and a.section not in _sections() else 0
         case "grep": grep(*a.words)
         case "like": return 0 if like(a.word, a.hint) or not a.hint else 127
+        case "show": return 0 if show(a.name) else 127
         case "sections": sections()
         case "net": net()
         case "doctor": doctor()

@@ -240,7 +240,7 @@ class TestInputAssistance(unittest.TestCase):
         env = dict(self.env, PATH=str(bindir), OLNM_PY=str(self.source))
         for shell in ['bash'] + (['zsh'] if shutil.which('zsh') else []):
             executable = shutil.which(shell)
-            for name, expected in [('njson', 'nodejs.org'), ('bi', 'bun.sh')]:
+            for name, expected in [('nscripts', 'nodejs.org'), ('bi', 'bun.sh')]:
                 result = subprocess.run([executable, '-c', 'eval "$(python3 "$OLNM_PY" init ' + shell + ')"; ' + name],
                                         cwd=self.work, env=env, text=True, capture_output=True, timeout=15)
                 self.assertEqual(result.returncode, 127, result.stderr)
@@ -254,9 +254,9 @@ class TestInputAssistance(unittest.TestCase):
         self.assertTrue(modules.is_dir())
         # Runtime checks happen per call: installation after init requires no reload.
         result = subprocess.run([bash, '-c', 'eval "$(python3 "$OLNM_PY" init bash)"; '
-                                 'njson </dev/null >/dev/null 2>&1; '
+                                 'nscripts </dev/null >/dev/null 2>&1; '
                                  'printf \'#!/bin/sh\\nprintf "42\\\\n"\\n\' > "$1/node"; '
-                                 '/bin/chmod +x "$1/node"; njson </dev/null', 'test', str(bindir)],
+                                 '/bin/chmod +x "$1/node"; nscripts </dev/null', 'test', str(bindir)],
                                 cwd=self.work, env=env, text=True, capture_output=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), '42')

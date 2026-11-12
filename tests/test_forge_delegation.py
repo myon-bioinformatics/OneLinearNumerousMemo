@@ -1,4 +1,4 @@
-"""🏠 The local forge lives in NagoyAction: olnm hands `hub` (and a dial move with a forge) to `nagoyaction hub`."""
+"""🏠 The local forge and workflow lint live in NagoyAction: olnm hands `hub`, `actionlint` (and a dial move with a forge) to `nagoyaction`."""
 import json
 import os
 from pathlib import Path
@@ -73,6 +73,33 @@ class ForgeDelegationTest(unittest.TestCase):
         result = self.olnm("hub", "repo", "ls", NAGOYACTION=str(script), PATH="/usr/bin:/bin")
         self.assertEqual(result.returncode, 7, result.stderr)
         self.assertEqual(self.forwarded(), ["repo", "ls"])
+
+    def test_actionlint_forwards_exact_arguments_and_exit_code(self):
+        result = self.olnm("actionlint", "--strict", "--root", "dir with space")
+        self.assertEqual(result.returncode, 7, result.stderr)
+        self.assertEqual(self.forwarded(), ["actionlint", "--strict", "--root", "dir with space"])
+        self.assertEqual(self.olnm("actionlint", "--help").returncode, 7)  # NagoyAction's own help
+        self.assertEqual(self.forwarded(), ["actionlint", "--help"])
+        script = f'eval "$(python3 {ROOT / "olnm.py"} init bash)"\nghlint --all --repeat 3; echo "rc=$?"'
+        result = subprocess.run(["bash", "-c", script], env=self.env, text=True, capture_output=True)
+        self.assertIn("rc=7", result.stdout, result.stderr)
+        self.assertEqual(self.forwarded(), ["actionlint", "--all", "--repeat", "3"])
+
+    def test_actionlint_without_nagoyaction_or_with_the_forge_alone(self):
+        result = self.olnm("actionlint", PATH="/usr/bin:/bin")
+        self.assertEqual(result.returncode, 127)
+        self.assertIn("nagoyaction actionlint", result.stderr)
+        self.assertIn("uv tool install", result.stderr)
+        helped = self.olnm("actionlint", "--help", PATH="/usr/bin:/bin")
+        self.assertEqual(helped.returncode, 0)
+        self.assertIn("usage: olnm actionlint", helped.stdout)
+        script = self.root / "carry" / "local_forge.py"  # what `hub bundle` carries has no lint
+        script.parent.mkdir()
+        script.write_text(FAKE.format(py=sys.executable, log=str(self.log)))
+        result = self.olnm("actionlint", NAGOYACTION=str(script), PATH="/usr/bin:/bin")
+        self.assertEqual(result.returncode, 127)
+        self.assertIn("is the forge alone", result.stderr)
+        self.assertFalse(self.log.exists())
 
     def test_missing_nagoyaction_explains_how_to_install(self):
         result = self.olnm("hub", "status", PATH="/usr/bin:/bin")
