@@ -89,10 +89,10 @@ class TestInputAssistance(unittest.TestCase):
         cases = [
             (("olnm", "ru"), ["run"]),
             (("olnm", "run", "pyc"), ["pyclean", "pycsv"]),
-            (("olnm", "hub", "issue", ""), ["ls", "new"]),
-            (("hubdial", "install", "--flavor", ""), ["forgejo", "gitea"]),
-            (("olnm", "hub", "install", "--flavor", "gi"), ["gitea"]),
-            (("olnm_dial", ""), ["0", "1", "2", "3"]),
+            (("olnm", "hub", "i"), ["init", "install", "issue"]),  # NagoyAction owns everything after SUB
+            (("hubdial", "s"), ["status", "sync"]),
+            (("olnm", "dial", "m"), ["mirror"]),
+            (("olnm_dial", ""), ["0", "1", "2", "3", "github", "local", "mirror", "offline"]),
             (("olnm_offline", "py"), ["python"]),
             (("olnm_like", "pyc"), ["pyclean", "pycsv"]),
             (("olnm", "tools", "ru"), ["rust", "rustc", "rustup"]),
@@ -105,23 +105,23 @@ class TestInputAssistance(unittest.TestCase):
                 result = self.cli("complete", "--", *words)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout.splitlines(), expected)
-        result = self.cli("complete", "--", "olnm", "hub", "issue", "ls", "--st")
-        self.assertEqual(result.stdout.strip(), "--state")
+        result = self.cli("complete", "--", "olnm", "ls", "--off")
+        self.assertEqual(result.stdout.strip(), "--offline")
         self.assertEqual(self.cli("complete", "--", "olnm", "run", "calc", "x").stdout, "")
 
     def test_bash_completion_registration_and_replies(self):
-        result = self.shell('complete -p olnm; COMP_WORDS=(olnm hub install --flavor ""); COMP_CWORD=4; _olnm_complete_bash; printf "%s\\n" "${COMPREPLY[@]}"')
+        result = self.shell('complete -p olnm; COMP_WORDS=(olnm hub s); COMP_CWORD=2; _olnm_complete_bash; printf "%s\\n" "${COMPREPLY[@]}"')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("-F _olnm_complete_bash", result.stdout)
-        self.assertEqual(result.stdout.splitlines()[-2:], ["forgejo", "gitea"])
+        self.assertEqual(result.stdout.splitlines()[-2:], ["status", "sync"])
 
     @unittest.skipUnless(shutil.which("zsh"), "zsh unavailable")
     def test_zsh_completion_registration_and_replies(self):
         result = self.shell('autoload -Uz compinit; compinit -u -D; eval "$(python3 "$OLNM_PY" init zsh)"; '
-                            'print -r -- "${_comps[olnm]}"; words=(olnm hub install --flavor ""); CURRENT=5; '
+                            'print -r -- "${_comps[olnm]}"; words=(olnm hub s); CURRENT=3; '
                             'compadd() { printf "%s\\n" "$@"; }; _olnm_complete_zsh', shell="zsh")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines(), ["_olnm_complete_zsh", "--", "forgejo", "gitea"])
+        self.assertEqual(result.stdout.splitlines(), ["_olnm_complete_zsh", "--", "status", "sync"])
 
     def test_hybrid_shell_preserves_every_section_and_supports_cli(self):
         for section in olnm._sections():
@@ -135,7 +135,7 @@ class TestInputAssistance(unittest.TestCase):
 
     def test_typos_suggest_without_executing_or_changing_input(self):
         for args, suggestion in [(('rn',), 'run'), (('hub', 'isue'), 'issue'),
-                                 (('hub', 'install', '--flavr', 'gitea'), '--flavor')]:
+                                 (('dial', 'mirorr'), 'mirror')]:
             result = self.cli(*args)
             self.assertEqual(result.returncode, 2, result.stderr)
             self.assertIn(suggestion, result.stderr)
