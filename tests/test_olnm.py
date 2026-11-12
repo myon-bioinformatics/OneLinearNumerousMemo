@@ -250,6 +250,31 @@ class TestOfflineDial(unittest.TestCase):
         r = bash('echo "[${UV_OFFLINE-}]"; export UV_OFFLINE=1; olnm_reload >/dev/null; echo "[$UV_OFFLINE]"')  # github: a value the user set stays
         self.assertEqual(r.stdout.splitlines(), ["[]", "[1]"])
 
+    def test_offline_roundtrip_preserves_user_environment(self):
+        for shell in ["bash"] + (["zsh"] if shutil.which("zsh") else []):
+            for uv, npm in [("1", "true"), ("false", "false"), ("", "")]:
+                with self.subTest(shell=shell, uv=uv, npm=npm):
+                    olnm.dial(0)
+                    script = (f'eval "$(python3 {PY} init {shell})"; '
+                              'olnm_reload >/dev/null; olnm_dial github >/dev/null; '
+                              'printf "[%s][%s][%s][%s]" "${UV_OFFLINE+x}" "$UV_OFFLINE" "${npm_config_offline+x}" "$npm_config_offline"')
+                    r = subprocess.run([shell, "-c", script], text=True, capture_output=True,
+                                       env=dict(os.environ, UV_OFFLINE=uv, npm_config_offline=npm))
+                    self.assertEqual(r.returncode, 0, r.stderr)
+                    self.assertEqual(r.stdout, f"[x][{uv}][x][{npm}]")
+
+    def test_offline_roundtrip_keeps_changes_made_by_user(self):
+        for shell in ["bash"] + (["zsh"] if shutil.which("zsh") else []):
+            with self.subTest(shell=shell):
+                olnm.dial(0)
+                script = (f'eval "$(python3 {PY} init {shell})"; '
+                          'export UV_OFFLINE=false npm_config_offline=false; '
+                          'olnm_dial github >/dev/null; '
+                          'printf "[%s][%s]" "$UV_OFFLINE" "$npm_config_offline"')
+                r = subprocess.run([shell, "-c", script], text=True, capture_output=True)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(r.stdout, "[false][false]")
+
     @unittest.skipUnless(shutil.which("uv"), "requires uv")
     def test_uv_refuses_the_network_at_once(self):
         olnm.dial("local")

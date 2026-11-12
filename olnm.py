@@ -1046,9 +1046,21 @@ def init(shell: str | None = None) -> str:
             if e["net"]:
                 parts.append(f'{e["name"]}() {{ echo "🔌 {e["name"]}: 🌍 needs dial mirror or github (now {DIALS[lv]}) → olnm_dial mirror" >&2; return 1; }}')
         # offline / local: uv and npm use only what is already cached, so they fail at once instead of waiting for a network
-        parts.append("export UV_OFFLINE=1 npm_config_offline=true _OLNM_OFFLINE=1")
+        parts.append("""if [ -z "${_OLNM_OFFLINE-}" ]; then
+_OLNM_UV_WAS_SET=${UV_OFFLINE+x}; _OLNM_UV_PREVIOUS=${UV_OFFLINE-}
+_OLNM_NPM_WAS_SET=${npm_config_offline+x}; _OLNM_NPM_PREVIOUS=${npm_config_offline-}
+fi
+export UV_OFFLINE=1 npm_config_offline=true _OLNM_OFFLINE=1""")
     else:  # back at mirror / github: undo only what olnm set
-        parts.append('[ -z "${_OLNM_OFFLINE-}" ] || unset UV_OFFLINE npm_config_offline _OLNM_OFFLINE')
+        parts.append("""if [ -n "${_OLNM_OFFLINE-}" ]; then
+if [ "${UV_OFFLINE-}" = 1 ]; then
+if [ "${_OLNM_UV_WAS_SET-}" = x ]; then export UV_OFFLINE="$_OLNM_UV_PREVIOUS"; else unset UV_OFFLINE; fi
+fi
+if [ "${npm_config_offline-}" = true ]; then
+if [ "${_OLNM_NPM_WAS_SET-}" = x ]; then export npm_config_offline="$_OLNM_NPM_PREVIOUS"; else unset npm_config_offline; fi
+fi
+unset _OLNM_OFFLINE _OLNM_UV_WAS_SET _OLNM_UV_PREVIOUS _OLNM_NPM_WAS_SET _OLNM_NPM_PREVIOUS
+fi""")
     if shell == "zsh":
         parts.append('command_not_found_handler() { _olnm_cnf "$@"; }')
         parts.append(r'''_olnm_complete_zsh() {
