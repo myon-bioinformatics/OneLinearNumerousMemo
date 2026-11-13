@@ -8,4 +8,4 @@
 - [概念図](olnm-concept.jpg): 切り出し箱 `(0, 408, 1536, 1024)`。アイコン／favicon のキャプション行より下、見出し「概念図」を含む。JPEG quality=95, subsampling=0 で再保存（ソースも JPEG）。
 - [提供画像（原本）](olnm-overview.jpg): アイコン・favicon・概念図が同居していた見本ボード。README の表示には使いません。
 
-GitHub Pages（`docs/index.html`）は `../assets/brand/favicon.ico` と `favicon.png` を相対参照します。
+GitHub Pages のビルド時に、正本の `favicon.ico` と `favicon.png` を `docs/assets/brand/` へコピーします。`docs/index.html` は公開ルート内の `assets/brand/favicon.ico` と `assets/brand/favicon.png` を相対参照します。生成コピーはリポジトリへ追加しません。
