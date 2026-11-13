@@ -1,5 +1,7 @@
 # 🧷 OneLinearNumerousMemo (olnm)
 
+[![olnm のアイコンと概念図：呼び出し方法・機能カテゴリ・利用シーン](assets/brand/olnm-overview.jpg)](assets/brand/olnm-overview.jpg)
+
 bash/zsh 用の **249 個のシェル関数**と、それを Python・Node から名前で呼べる **28 個の Python API**。
 ローカル GitHub（Gitea / Forgejo）とワークフロー検査は NagoyAction（`nagoyaction hub` / `nagoyaction actionlint`）へ転送する。
 実装は `olnm.py` 1 ファイル、実行時の Python 外部依存はゼロ。
