@@ -1,6 +1,8 @@
 # 🧷 OneLinearNumerousMemo (olnm)
 
-[![olnm のアイコンと概念図：呼び出し方法・機能カテゴリ・利用シーン](assets/brand/olnm-overview.jpg)](assets/brand/olnm-overview.jpg)
+<p align="center">
+  <img src="assets/brand/olnm-icon.png" width="160" height="160" alt="olnm のアイコン：巻物に Python ロゴと周辺の開発ツール">
+</p>
 
 bash/zsh 用の **249 個のシェル関数**と、それを Python・Node から名前で呼べる **28 個の Python API**。
 ローカル GitHub（Gitea / Forgejo）とワークフロー検査は NagoyAction（`nagoyaction hub` / `nagoyaction actionlint`）へ転送する。
@@ -11,6 +13,13 @@ Node / Bun / gh / Docker / fzf などは、それを使う関数を実行する�
 
 
 利用手順の切り替え・再現記録: [olnm 利用・検証ガイド](https://myon-bioinformatics.github.io/OneLinearNumerousMemo/)
+
+## 概念図
+
+[![olnm の概念図：呼び出し方法・機能カテゴリ・利用シーン](assets/brand/olnm-concept.jpg)](assets/brand/olnm-concept.jpg)
+
+アイコンと favicon は提供画像 `assets/brand/olnm-overview.jpg` から切り出しています。原本の PNG / SVG はなく、JPEG からの切り出しです。画像をクリックすると拡大できます。詳細は [assets/brand/README.md](assets/brand/README.md) を参照してください。
+
 
 ## 目次
 
